@@ -28,9 +28,8 @@ use target_lexicon::triple;
 
 use crate::write_u32;
 use crate::loader::ElfLoader;
-use crate::sexp::{SExp, SExpValue, Srcloc, CreateAtom};
+use crate::sexp::{SExp, SExpValue, Srcloc, CreateSExp, dequote};
 use crate::support::{
-    debug_dequote as dequote,
     debug_find_all_by_hash as find_all_by_hash, debug_is_atom as is_atom,
     debug_is_wrapped_atom as is_wrapped_atom,
     debug_sha256tree as sha256tree
@@ -1116,7 +1115,7 @@ impl DwarfBuilder {
     }
 
     // Create dwarf traffic needed to ensure that gdb can find the locals.
-    fn decorate_function<T: SExp, C: CreateAtom>(
+    fn decorate_function<T: SExp, C: CreateSExp>(
         &mut self,
         label: &str,
         addr: usize,
@@ -1393,7 +1392,7 @@ impl<T: SExp> Program<T> {
         return format!("_{}_{n}", hexify(hash));
     }
 
-    fn do_throw<C: CreateAtom>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8]) {
+    fn do_throw<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8]) {
         self.load_atom::<C>(source_sexp.clone(), loc, hash, hash);
         self.push::<C>(source_sexp.clone(), loc, Instr::Swi(SWI_PRINT_EXPR));
         self.push::<C>(source_sexp, loc, Instr::Swi(SWI_THROW));
@@ -1426,12 +1425,12 @@ impl<T: SExp> Program<T> {
         }
     }
 
-    fn load_sexp<C: CreateAtom>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], s: T) {
+    fn load_sexp<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], s: T) {
         let label = self.add_sexp(loc, hash, s);
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn first_rest<C: CreateAtom>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], lst: &[T], offset: i32) {
+    fn first_rest<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], lst: &[T], offset: i32) {
         if lst.len() != 1 {
             return self.do_throw::<C>(source_sexp, loc, hash);
         }
@@ -1453,7 +1452,7 @@ impl<T: SExp> Program<T> {
         }
     }
 
-    fn do_operator<C: CreateAtom>(
+    fn do_operator<C: CreateSExp>(
         &mut self,
         loc: &T::Srcloc,
         hash: &[u8],
@@ -1648,7 +1647,7 @@ impl<T: SExp> Program<T> {
     }
 
     // R0 = the address of the env block.
-    fn env_select<C: CreateAtom>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
+    fn env_select<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
         if v.is_empty() {
             self.load_atom::<C>(source_sexp, loc, hash, v);
             return;
@@ -1705,7 +1704,7 @@ impl<T: SExp> Program<T> {
         label
     }
 
-    fn load_atom<C: CreateAtom>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
+    fn load_atom<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
         let label = self.add_atom(hash, v);
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
@@ -1730,7 +1729,7 @@ impl<T: SExp> Program<T> {
         body_label
     }
 
-    fn push_be<C: CreateAtom>(
+    fn push_be<C: CreateSExp>(
         &mut self,
         source_sexp: T,
         srcloc: &T::Srcloc,
@@ -1797,11 +1796,11 @@ impl<T: SExp> Program<T> {
         }
     }
 
-    fn push<C: CreateAtom>(&mut self, source_sexp: T, srcloc: &T::Srcloc, instr: Instr) {
+    fn push<C: CreateSExp>(&mut self, source_sexp: T, srcloc: &T::Srcloc, instr: Instr) {
         self.push_be::<C>(source_sexp, srcloc, instr, None);
     }
 
-    fn emit_waiting<C: CreateAtom>(&mut self) {
+    fn emit_waiting<C: CreateSExp>(&mut self) {
         while let Some((label, sexp)) = self.waiting_programs.pop() {
             eprintln!("{} sexp {:?} {}", label, sexp.loc(), sexp);
             let hash = sha256tree(sexp.clone());
@@ -1873,7 +1872,7 @@ impl<T: SExp> Program<T> {
         }
     }
 
-    fn start_insns<C: CreateAtom>(&mut self) {
+    fn start_insns<C: CreateSExp>(&mut self) {
         let srcloc = T::Srcloc::start("*prolog*");
         let source_sexp = C::atom::<T>(srcloc.clone(), b"prolog");
         for i in &[
@@ -1893,7 +1892,7 @@ impl<T: SExp> Program<T> {
         }
     }
 
-    fn finish_insns<C: CreateAtom>(&mut self) -> Result<(), String> {
+    fn finish_insns<C: CreateSExp>(&mut self) -> Result<(), String> {
         let srcloc = T::Srcloc::start("*epilog*");
         let source_sexp = C::atom::<T>(srcloc.clone(), b"epilog");
         let mut constants = HashMap::new();
@@ -2144,7 +2143,7 @@ impl<T: SExp> Program<T> {
         })
     }
 
-    pub fn new<C: CreateAtom>(
+    pub fn new<C: CreateSExp>(
         program: HashMap<String, T::Srcloc>,
         filename: &str,
         elf_output: &str,

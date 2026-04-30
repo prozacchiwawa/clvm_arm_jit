@@ -54,11 +54,21 @@ pub trait Srcloc: Clone + Debug + Display {
     fn until(&self) -> Option<Until>;
 }
 
-pub trait CreateAtom {
+pub trait CreateSExp {
     fn atom<S: SExp>(loc: S::Srcloc, bytes: &[u8]) -> S;
     fn cons<S: SExp>(loc: S::Srcloc, a: S, b: S) -> S;
 
     fn parse_sexp<S: SExp, I>(start: S::Srcloc, input: I) -> Result<Vec<S>, (S::Srcloc, String)>
     where
         I: Iterator<Item = u8>;
+}
+
+pub fn dequote<T: SExp>(sexp: T) -> Option<T> {
+    match sexp.explode() {
+        SExpValue::Cons(_, left, right) => match left.explode() {
+            SExpValue::Atom(_, atom) if atom == b"\x01" => Some(right),
+            _ => None,
+        },
+        _ => None,
+    }
 }

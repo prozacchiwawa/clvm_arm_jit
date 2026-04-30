@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 use sha2::{Sha256, Digest};
-use crate::sexp::{SExp, SExpValue, CreateAtom};
+use crate::sexp::{SExp, SExpValue, CreateSExp};
 
 /// Given an SExp and a transformation, make a map of the transformed subtrees of
 /// the given SExp in code that's indexed by treehash.  This will merge equivalent
@@ -48,7 +48,7 @@ use crate::sexp::{SExp, SExpValue, CreateAtom};
 /// identical to the user's input, so those whole trees return with their source
 /// locations and the form of the user's input (Ys not rewritten as the number 89,
 /// but as identifiers).
-pub fn build_table_mut<T: SExp+Eq+Hash, X, C: CreateAtom>(
+pub fn build_table_mut<T: SExp+Eq+Hash, X, C: CreateSExp>(
     code_map: &mut HashMap<String, X>,
     tx: &dyn Fn(&T) -> X,
     code: &T,
@@ -75,15 +75,15 @@ pub fn build_table_mut<T: SExp+Eq+Hash, X, C: CreateAtom>(
     }
 }
 
-pub fn build_symbol_table_mut<T: SExp+Eq+Hash, C: CreateAtom>(code_map: &mut HashMap<String, String>, code: &T) -> Vec<u8> {
+pub fn build_symbol_table_mut<T: SExp+Eq+Hash, C: CreateSExp>(code_map: &mut HashMap<String, String>, code: &T) -> Vec<u8> {
     build_table_mut::<T, String, C>(code_map, &|sexp: &T| sexp.loc().to_string(), code)
 }
 
-pub fn build_swap_table_mut<T: SExp+Eq+Hash, C: CreateAtom>(code_map: &mut HashMap<String, T>, code: &T) -> Vec<u8> {
+pub fn build_swap_table_mut<T: SExp+Eq+Hash, C: CreateSExp>(code_map: &mut HashMap<String, T>, code: &T) -> Vec<u8> {
     build_table_mut::<T, T, C>(code_map, &|sexp: &T| sexp.clone(), code)
 }
 
-fn relabel_inner_<S: SExp+Eq+Hash, C: CreateAtom>(
+fn relabel_inner_<S: SExp+Eq+Hash, C: CreateSExp>(
     code_map: &HashMap<String, S>,
     swap_table: &HashMap<S, String>,
     code: &S,
@@ -150,7 +150,7 @@ fn relabel_inner_<S: SExp+Eq+Hash, C: CreateAtom>(
 /// retain the form the user gave it.  This is fragile but works for now.
 ///
 /// A way to do this better is planned.
-pub fn relabel<S: SExp+Eq+Hash, C: CreateAtom>(code_map: &HashMap<String, S>, code: &S) -> S {
+pub fn relabel<S: SExp+Eq+Hash, C: CreateSExp>(code_map: &HashMap<String, S>, code: &S) -> S {
     let mut inv_swap_table = HashMap::new();
     build_swap_table_mut::<S, C>(&mut inv_swap_table, code);
     let mut swap_table = HashMap::new();
@@ -204,16 +204,6 @@ pub fn debug_is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
                 Some((loc, atom))
             }
         }
-        _ => None,
-    }
-}
-
-pub fn debug_dequote<T: SExp>(sexp: T) -> Option<T> {
-    match sexp.explode() {
-        SExpValue::Cons(_, left, right) => match left.explode() {
-            SExpValue::Atom(_, atom) if atom == b"\x01" => Some(right),
-            _ => None,
-        },
         _ => None,
     }
 }

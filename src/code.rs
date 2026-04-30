@@ -26,15 +26,14 @@ use gimli::Arm;
 use gimli::{DW_ATE_unsigned, Encoding, Format, LineEncoding};
 use target_lexicon::triple;
 
-use crate::write_u32;
 use crate::loader::ElfLoader;
-use crate::sexp::{SExp, SExpValue, Srcloc, CreateSExp, dequote};
+use crate::mem::write_u32;
+use crate::sexp::{SExp, SExpValue, Srcloc, CreateSExp, dequote, bi_one, bi_zero, Number};
 use crate::support::{
     debug_find_all_by_hash as find_all_by_hash, debug_is_atom as is_atom,
     debug_is_wrapped_atom as is_wrapped_atom,
     debug_sha256tree as sha256tree
 };
-use crate::{bi_one, bi_zero, Number};
 
 pub const NEXT_ALLOC_OFFSET: i32 = 0;
 

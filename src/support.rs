@@ -6,11 +6,11 @@ use std::rc::Rc;
 use sha2::{Sha256, Digest};
 use crate::sexp::{SExp, SExpValue, CreateSExp};
 
-pub fn debug_sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
+pub fn sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
     match sexp.explode() {
         SExpValue::Cons(_, left, right) => {
-            let hash_left = debug_sha256tree(left);
-            let hash_right = debug_sha256tree(right);
+            let hash_left = sha256tree(left);
+            let hash_right = sha256tree(right);
             let mut hasher = Sha256::new();
             hasher.update([2]);
             hasher.update(hash_left);
@@ -29,22 +29,22 @@ pub fn debug_sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
     }
 }
 
-pub fn debug_truthy<T: SExp>(sexp: T) -> bool {
+pub fn truthy<T: SExp>(sexp: T) -> bool {
     !sexp.nilp()
 }
 
-pub fn debug_is_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
+pub fn is_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
     sexp.atom_bytes::<T>()
 }
 
-pub fn debug_is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
+pub fn is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
     match sexp.explode() {
         SExpValue::Cons(_, left, right) => {
             let (loc, atom) = match left.explode() {
                 SExpValue::Atom(loc, atom) => (loc, atom),
                 _ => return None,
             };
-            if debug_truthy(right) {
+            if truthy(right) {
                 None
             } else {
                 Some((loc, atom))
@@ -54,10 +54,10 @@ pub fn debug_is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
     }
 }
 
-fn debug_collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u8> {
+fn collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u8> {
     if let SExpValue::Cons(_, left, right) = sexp.explode() {
-        let hash_left = debug_collect_by_hash(hash, left, matches);
-        let hash_right = debug_collect_by_hash(hash, right, matches);
+        let hash_left = collect_by_hash(hash, left, matches);
+        let hash_right = collect_by_hash(hash, right, matches);
         let mut hasher = Sha256::new();
         hasher.update([2]);
         hasher.update(hash_left);
@@ -68,7 +68,7 @@ fn debug_collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) ->
         }
         my_hash
     } else {
-        let the_hash = debug_sha256tree(sexp.clone());
+        let the_hash = sha256tree(sexp.clone());
         if the_hash == hash {
             matches.push(sexp);
         }
@@ -76,8 +76,8 @@ fn debug_collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) ->
     }
 }
 
-pub fn debug_find_all_by_hash<T: SExp>(hash: &[u8], sexp: T) -> Vec<T> {
+pub fn find_all_by_hash<T: SExp>(hash: &[u8], sexp: T) -> Vec<T> {
     let mut matches = Vec::new();
-    debug_collect_by_hash(hash, sexp, &mut matches);
+    collect_by_hash(hash, sexp, &mut matches);
     matches
 }

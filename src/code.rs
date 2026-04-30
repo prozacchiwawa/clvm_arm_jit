@@ -30,9 +30,9 @@ use crate::loader::ElfLoader;
 use crate::mem::write_u32;
 use crate::sexp::{SExp, SExpValue, Srcloc, CreateSExp, dequote, bi_one, bi_zero, Number};
 use crate::support::{
-    debug_find_all_by_hash as find_all_by_hash, debug_is_atom as is_atom,
-    debug_is_wrapped_atom as is_wrapped_atom,
-    debug_sha256tree as sha256tree
+    find_all_by_hash as find_all_by_hash, is_atom as is_atom,
+    is_wrapped_atom as is_wrapped_atom,
+    sha256tree as sha256tree
 };
 
 pub const NEXT_ALLOC_OFFSET: i32 = 0;
@@ -120,7 +120,7 @@ pub struct ElfObject {
 // Header --
 // WORD remaining section size
 // HALF dwarf version
-// WORD .debug_info offset
+// WORD .info offset
 // BYTE bytes per address (n)
 // Then a sequence of tuples after padding to n bytes --
 // n-addr Start Address

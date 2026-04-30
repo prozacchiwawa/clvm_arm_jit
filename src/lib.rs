@@ -1,5 +1,6 @@
 pub mod code;
 pub mod loader;
+pub mod sexp;
 pub mod support;
 
 use num_bigint::{BigInt, ToBigInt};

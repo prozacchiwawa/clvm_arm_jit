@@ -4,12 +4,7 @@ use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::rc::Rc;
 use sha2::{Sha256, Digest};
-
-use crate::Number;
-
-pub fn u8_from_number(v: Number) -> Vec<u8> {
-    v.to_signed_bytes_be()
-}
+use crate::sexp::{SExp, SExpValue, CreateAtom};
 
 /// Given an SExp and a transformation, make a map of the transformed subtrees of
 /// the given SExp in code that's indexed by treehash.  This will merge equivalent
@@ -53,13 +48,13 @@ pub fn u8_from_number(v: Number) -> Vec<u8> {
 /// identical to the user's input, so those whole trees return with their source
 /// locations and the form of the user's input (Ys not rewritten as the number 89,
 /// but as identifiers).
-pub fn build_table_mut<T: DebugSExp+Eq+Hash, X, C: DebugCreateAtom>(
+pub fn build_table_mut<T: SExp+Eq+Hash, X, C: CreateAtom>(
     code_map: &mut HashMap<String, X>,
     tx: &dyn Fn(&T) -> X,
     code: &T,
 ) -> Vec<u8> {
     match code.explode() {
-        DebugSExpValue::<T>::Cons(_l, a, b) => {
+        SExpValue::<T>::Cons(_l, a, b) => {
             let mut left = build_table_mut::<T, X, C>(code_map, tx, a.borrow());
             let mut right = build_table_mut::<T, X, C>(code_map, tx, b.borrow());
             let mut data = vec![2];
@@ -69,26 +64,26 @@ pub fn build_table_mut<T: DebugSExp+Eq+Hash, X, C: DebugCreateAtom>(
             code_map.entry(hex::encode(&treehash)).or_insert_with(|| tx(code));
             treehash.to_vec()
         }
-        DebugSExpValue::<T>::Atom(_, a) => {
+        SExpValue::<T>::Atom(_, a) => {
             let mut data = vec![1];
             data.append(&mut a.clone());
             let treehash = Sha256::digest(&data);
             code_map.insert(hex::encode(&treehash), tx(code));
             treehash.to_vec()
         }
-        DebugSExpValue::<T>::Nil(l) => build_table_mut::<T, X, C>(code_map, tx, &C::atom::<T>(l.clone(), &[]))
+        SExpValue::<T>::Nil(l) => build_table_mut::<T, X, C>(code_map, tx, &C::atom::<T>(l.clone(), &[]))
     }
 }
 
-pub fn build_symbol_table_mut<T: DebugSExp+Eq+Hash, C: DebugCreateAtom>(code_map: &mut HashMap<String, String>, code: &T) -> Vec<u8> {
+pub fn build_symbol_table_mut<T: SExp+Eq+Hash, C: CreateAtom>(code_map: &mut HashMap<String, String>, code: &T) -> Vec<u8> {
     build_table_mut::<T, String, C>(code_map, &|sexp: &T| sexp.loc().to_string(), code)
 }
 
-pub fn build_swap_table_mut<T: DebugSExp+Eq+Hash, C: DebugCreateAtom>(code_map: &mut HashMap<String, T>, code: &T) -> Vec<u8> {
+pub fn build_swap_table_mut<T: SExp+Eq+Hash, C: CreateAtom>(code_map: &mut HashMap<String, T>, code: &T) -> Vec<u8> {
     build_table_mut::<T, T, C>(code_map, &|sexp: &T| sexp.clone(), code)
 }
 
-fn relabel_inner_<S: DebugSExp+Eq+Hash, C: DebugCreateAtom>(
+fn relabel_inner_<S: SExp+Eq+Hash, C: CreateAtom>(
     code_map: &HashMap<String, S>,
     swap_table: &HashMap<S, String>,
     code: &S,
@@ -98,7 +93,7 @@ fn relabel_inner_<S: DebugSExp+Eq+Hash, C: DebugCreateAtom>(
         .and_then(|res| code_map.get(res))
         .cloned()
         .unwrap_or_else(|| match code.explode() {
-            DebugSExpValue::<S>::Cons(l, a, b) => {
+            SExpValue::<S>::Cons(l, a, b) => {
                 let new_a = relabel_inner_::<S, C>(code_map, swap_table, a.borrow());
                 let new_b = relabel_inner_::<S, C>(code_map, swap_table, b.borrow());
                 C::cons::<S>(l.clone(), new_a, new_b)
@@ -155,7 +150,7 @@ fn relabel_inner_<S: DebugSExp+Eq+Hash, C: DebugCreateAtom>(
 /// retain the form the user gave it.  This is fragile but works for now.
 ///
 /// A way to do this better is planned.
-pub fn relabel<S: DebugSExp+Eq+Hash, C: DebugCreateAtom>(code_map: &HashMap<String, S>, code: &S) -> S {
+pub fn relabel<S: SExp+Eq+Hash, C: CreateAtom>(code_map: &HashMap<String, S>, code: &S) -> S {
     let mut inv_swap_table = HashMap::new();
     build_swap_table_mut::<S, C>(&mut inv_swap_table, code);
     let mut swap_table = HashMap::new();
@@ -165,61 +160,9 @@ pub fn relabel<S: DebugSExp+Eq+Hash, C: DebugCreateAtom>(code_map: &HashMap<Stri
     relabel_inner_::<S, C>(code_map, &swap_table, code)
 }
 
-// Traits for varying the type of CLVM expressions.
-#[derive(Clone, Debug)]
-pub enum DebugSExpValue<T: DebugSExp> {
-    Nil(T::Srcloc),
-    Atom(T::Srcloc, Vec<u8>),
-    Cons(T::Srcloc, T, T),
-}
-
-pub struct Until {
-    pub line: u32,
-    pub col: u32,
-}
-
-pub trait DebugSrcloc: Clone + Debug + Display {
-    fn start(filename: &str) -> Self;
-    fn filename(&self) -> String;
-    fn line(&self) -> usize;
-    fn col(&self) -> usize;
-    fn overlap(&self, other: &Self) -> bool;
-    fn until(&self) -> Option<Until>;
-}
-
-pub trait DebugCreateAtom {
-    fn atom<SExp: DebugSExp>(loc: SExp::Srcloc, bytes: &[u8]) -> SExp;
-    fn cons<SExp: DebugSExp>(loc: SExp::Srcloc, a: SExp, b: SExp) -> SExp;
-
-    fn parse_sexp<SExp: DebugSExp, I>(start: SExp::Srcloc, input: I) -> Result<Vec<SExp>, (SExp::Srcloc, String)>
-    where
-        I: Iterator<Item = u8>;
-}
-
-pub trait DebugSExp: Clone + Display {
-    type Srcloc: DebugSrcloc;
-    fn loc(&self) -> Self::Srcloc;
-    fn atomize(&self) -> Self;
-    fn to_number(&self) -> Option<Number>;
-    fn proper_list(&self) -> Option<Vec<Self>>;
-    fn explode(&self) -> DebugSExpValue<Self>;
-
-    fn nilp(&self) -> bool {
-        matches!(self.atom_bytes::<Self>(), Some((_, bytes)) if bytes.is_empty())
-    }
-
-    fn atom_bytes<T: DebugSExp>(&self) -> Option<(Self::Srcloc, Vec<u8>)> {
-        match self.explode() {
-            DebugSExpValue::Cons(_, _, _) => None,
-            DebugSExpValue::Nil(loc) => Some((loc, Vec::new())),
-            DebugSExpValue::Atom(loc, bytes) => Some((loc, bytes)),
-        }
-    }
-}
-
-pub fn debug_sha256tree<T: DebugSExp>(sexp: T) -> Vec<u8> {
+pub fn debug_sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
     match sexp.explode() {
-        DebugSExpValue::Cons(_, left, right) => {
+        SExpValue::Cons(_, left, right) => {
             let hash_left = debug_sha256tree(left);
             let hash_right = debug_sha256tree(right);
             let mut hasher = Sha256::new();
@@ -240,19 +183,19 @@ pub fn debug_sha256tree<T: DebugSExp>(sexp: T) -> Vec<u8> {
     }
 }
 
-pub fn debug_truthy<T: DebugSExp>(sexp: T) -> bool {
+pub fn debug_truthy<T: SExp>(sexp: T) -> bool {
     !sexp.nilp()
 }
 
-pub fn debug_is_atom<T: DebugSExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
+pub fn debug_is_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
     sexp.atom_bytes::<T>()
 }
 
-pub fn debug_is_wrapped_atom<T: DebugSExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
+pub fn debug_is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
     match sexp.explode() {
-        DebugSExpValue::Cons(_, left, right) => {
+        SExpValue::Cons(_, left, right) => {
             let (loc, atom) = match left.explode() {
-                DebugSExpValue::Atom(loc, atom) => (loc, atom),
+                SExpValue::Atom(loc, atom) => (loc, atom),
                 _ => return None,
             };
             if debug_truthy(right) {
@@ -265,18 +208,18 @@ pub fn debug_is_wrapped_atom<T: DebugSExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8
     }
 }
 
-pub fn debug_dequote<T: DebugSExp>(sexp: T) -> Option<T> {
+pub fn debug_dequote<T: SExp>(sexp: T) -> Option<T> {
     match sexp.explode() {
-        DebugSExpValue::Cons(_, left, right) => match left.explode() {
-            DebugSExpValue::Atom(_, atom) if atom == b"\x01" => Some(right),
+        SExpValue::Cons(_, left, right) => match left.explode() {
+            SExpValue::Atom(_, atom) if atom == b"\x01" => Some(right),
             _ => None,
         },
         _ => None,
     }
 }
 
-fn debug_collect_by_hash<T: DebugSExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u8> {
-    if let DebugSExpValue::Cons(_, left, right) = sexp.explode() {
+fn debug_collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u8> {
+    if let SExpValue::Cons(_, left, right) = sexp.explode() {
         let hash_left = debug_collect_by_hash(hash, left, matches);
         let hash_right = debug_collect_by_hash(hash, right, matches);
         let mut hasher = Sha256::new();
@@ -297,7 +240,7 @@ fn debug_collect_by_hash<T: DebugSExp>(hash: &[u8], sexp: T, matches: &mut Vec<T
     }
 }
 
-pub fn debug_find_all_by_hash<T: DebugSExp>(hash: &[u8], sexp: T) -> Vec<T> {
+pub fn debug_find_all_by_hash<T: SExp>(hash: &[u8], sexp: T) -> Vec<T> {
     let mut matches = Vec::new();
     debug_collect_by_hash(hash, sexp, &mut matches);
     matches

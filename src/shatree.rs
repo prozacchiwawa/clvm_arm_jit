@@ -1,10 +1,5 @@
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use std::fmt::{Debug, Display};
-use std::hash::Hash;
-use std::rc::Rc;
-use sha2::{Sha256, Digest};
-use crate::sexp::{SExp, SExpValue, CreateSExp};
+use crate::sexp::{SExp, SExpValue};
+use sha2::{Digest, Sha256};
 
 pub fn sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
     match sexp.explode() {

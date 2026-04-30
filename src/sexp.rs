@@ -1,11 +1,6 @@
-use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::hash::Hash;
-use std::rc::Rc;
 
 use num_bigint::{BigInt, ToBigInt};
-use sha2::{Sha256, Digest};
 
 pub fn u8_from_number(v: Number) -> Vec<u8> {
     v.to_signed_bytes_be()

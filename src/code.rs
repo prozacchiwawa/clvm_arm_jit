@@ -3,37 +3,32 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::mem::swap;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::rc::Rc;
+use std::str::FromStr;
 
 use sha2::Digest;
 use sha2::Sha256;
 
 use faerie::{ArtifactBuilder, Decl, Link, SectionKind};
 use gimli;
+use gimli::Arm;
 use gimli::constants::{
     DW_AT_byte_size, DW_AT_encoding, DW_AT_frame_base, DW_AT_high_pc, DW_AT_language,
-    DW_AT_location, DW_AT_low_pc, DW_AT_name, DW_AT_type, DW_TAG_base_type,
-    DW_TAG_formal_parameter, DW_TAG_pointer_type, DW_TAG_subprogram, DW_LANG_C99,
+    DW_AT_location, DW_AT_low_pc, DW_AT_name, DW_AT_type, DW_LANG_C99, DW_TAG_base_type,
+    DW_TAG_formal_parameter, DW_TAG_pointer_type, DW_TAG_subprogram,
 };
 use gimli::write::{
-    Address, AttributeValue, CallFrameInstruction, CieId, CommonInformationEntry,
-    DirectoryId, Dwarf, Expression, FileId, FrameDescriptionEntry, FrameTable,
-    LineProgram, LineString, Location, LocationList, Range, RangeList, Section, Sections, Unit,
-    UnitEntryId, UnitId,
+    Address, AttributeValue, CallFrameInstruction, CieId, CommonInformationEntry, DirectoryId,
+    Dwarf, Expression, FileId, FrameDescriptionEntry, FrameTable, LineProgram, LineString,
+    Location, LocationList, Range, RangeList, Section, Sections, Unit, UnitEntryId, UnitId,
 };
-use gimli::Arm;
 use gimli::{DW_ATE_unsigned, Encoding, Format, LineEncoding};
 use target_lexicon::triple;
 
 use crate::loader::ElfLoader;
 use crate::mem::write_u32;
-use crate::sexp::{SExp, SExpValue, Srcloc, CreateSExp, dequote, bi_one, bi_zero, Number};
-use crate::support::{
-    find_all_by_hash as find_all_by_hash, is_atom as is_atom,
-    is_wrapped_atom as is_wrapped_atom,
-    sha256tree as sha256tree
-};
+use crate::sexp::{CreateSExp, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero, dequote};
+use crate::shatree::{find_all_by_hash, is_atom, is_wrapped_atom, sha256tree};
 
 pub const NEXT_ALLOC_OFFSET: i32 = 0;
 
@@ -222,6 +217,7 @@ pub trait Encodable {
     fn encode(&self, v: &mut Vec<u8>, r: &mut Vec<Relocation>, function: &str);
 }
 
+#[allow(dead_code)]
 enum ArmCond {
     Unconditional,
     Equal,
@@ -307,7 +303,6 @@ pub enum RelocationKind {
 }
 
 pub struct Relocation {
-    kind: RelocationKind,
     function: String,
     code_location: usize,
     reloc_target: String,
@@ -344,7 +339,6 @@ impl Encodable for Instr {
             }
             Instr::Addr(target, text) => {
                 r.push(Relocation {
-                    kind: RelocationKind::Long,
                     function: function.to_string(),
                     code_location: v.len(),
                     reloc_target: target.clone(),
@@ -454,7 +448,6 @@ impl Encodable for Instr {
             ),
             Instr::B(target) => {
                 r.push(Relocation {
-                    kind: RelocationKind::Branch,
                     function: function.to_string(),
                     code_location: v.len(),
                     reloc_target: target.clone(),
@@ -463,7 +456,6 @@ impl Encodable for Instr {
             }
             Instr::Bl(target) => {
                 r.push(Relocation {
-                    kind: RelocationKind::Branch,
                     function: function.to_string(),
                     code_location: v.len(),
                     reloc_target: target.clone(),
@@ -491,7 +483,6 @@ impl Encodable for Instr {
                 // Emit a jump to +8
                 vec_from_u32(v, ArmCond::Unconditional.to_u32() | 5 << 25 | 0);
                 r.push(Relocation {
-                    kind: RelocationKind::Long,
                     function: function.to_string(),
                     code_location: v.len(),
                     reloc_target: target.clone(),
@@ -746,14 +737,14 @@ impl DwarfBuilder {
         unit_ent.set(DW_AT_language, AttributeValue::Language(DW_LANG_C99));
 
         let unit_id = dwarf.units.add(unit);
-        let mut mutable_unit = dwarf.units.get_mut(unit_id);
+        let mutable_unit = dwarf.units.get_mut(unit_id);
         let base_type_id = mutable_unit.add(mutable_unit.root(), DW_TAG_base_type);
-        let mut base_ent = mutable_unit.get_mut(base_type_id);
+        let base_ent = mutable_unit.get_mut(base_type_id);
         base_ent.set(DW_AT_byte_size, AttributeValue::Data1(4));
         base_ent.set(DW_AT_encoding, AttributeValue::Encoding(DW_ATE_unsigned));
         base_ent.set(DW_AT_name, AttributeValue::String(b"word".to_vec()));
         let type_id = mutable_unit.add(mutable_unit.root(), DW_TAG_pointer_type);
-        let mut type_ent = mutable_unit.get_mut(type_id);
+        let type_ent = mutable_unit.get_mut(type_id);
         type_ent.set(DW_AT_name, AttributeValue::String(b"sexp".to_vec()));
         type_ent.set(DW_AT_byte_size, AttributeValue::Udata(4));
         type_ent.set(DW_AT_type, AttributeValue::UnitRef(base_type_id));
@@ -852,7 +843,11 @@ impl DwarfBuilder {
         hasher.finalize().to_vec()
     }
 
-    fn add_synthetic_line<T: SExp>(&mut self, loc: &T::Srcloc, source_sexp: &impl fmt::Display) -> u64 {
+    fn add_synthetic_line<T: SExp>(
+        &mut self,
+        loc: &T::Srcloc,
+        source_sexp: &impl fmt::Display,
+    ) -> u64 {
         let synthetic_key = Self::synthetic_expr_key::<T>(loc, source_sexp);
         if let Some(line) = self.synthetic_expr_line_by_key.get(&synthetic_key) {
             return *line;
@@ -1188,7 +1183,7 @@ impl DwarfBuilder {
                     data: fbexpr_mid,
                 });
                 let loc_list_id = unit.locations.add(LocationList(loclist));
-                let mut sub_ent = unit.get_mut(subprogram_id);
+                let sub_ent = unit.get_mut(subprogram_id);
                 sub_ent.set(
                     DW_AT_name,
                     AttributeValue::String(subprogram_name.as_bytes().to_vec()),
@@ -1276,7 +1271,7 @@ impl DwarfBuilder {
     }
 
     fn write(&mut self, current_addr: usize, instrs: &mut Vec<Instr>) -> gimli::write::Result<()> {
-        let mut unit = self.dwarf.units.get_mut(self.unit_id);
+        let unit = self.dwarf.units.get_mut(self.unit_id);
         let unit_ent = unit.get_mut(unit.root());
         unit_ent.set(
             DW_AT_high_pc,
@@ -1322,14 +1317,12 @@ impl Constant {
 }
 
 pub struct Program<T: SExp> {
-    program: HashMap<String, T::Srcloc>,
     target_addr: u32,
     finished_insns: Vec<Instr>,
     first_label: String,
     env_label: String,
     encounters_of_code: HashMap<Vec<u8>, usize>,
     labels_by_hash: HashMap<Vec<u8>, String>,
-    done_programs: HashSet<String>,
     waiting_programs: Vec<(String, T)>,
     constants: HashMap<Vec<u8>, Constant>,
     symbol_table: Rc<HashMap<String, String>>,
@@ -1429,7 +1422,14 @@ impl<T: SExp> Program<T> {
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn first_rest<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], lst: &[T], offset: i32) {
+    fn first_rest<C: CreateSExp>(
+        &mut self,
+        source_sexp: T,
+        loc: &T::Srcloc,
+        hash: &[u8],
+        lst: &[T],
+        offset: i32,
+    ) {
         if lst.len() != 1 {
             return self.do_throw::<C>(source_sexp, loc, hash);
         }
@@ -1500,7 +1500,7 @@ impl<T: SExp> Program<T> {
 
             if let Some(quoted_code) = dequote(lst[0].clone()) {
                 // Short circuit by reading out the quoted code and running it.
-                let code_comp = self.add(quoted_code.clone());
+                self.add(quoted_code.clone());
 
                 for i in &[
                     Instr::Addi(Register::R(7), Register::R(4), 0),
@@ -1646,7 +1646,13 @@ impl<T: SExp> Program<T> {
     }
 
     // R0 = the address of the env block.
-    fn env_select<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
+    fn env_select<C: CreateSExp>(
+        &mut self,
+        source_sexp: T,
+        loc: &T::Srcloc,
+        hash: &[u8],
+        v: &[u8],
+    ) {
         if v.is_empty() {
             self.load_atom::<C>(source_sexp, loc, hash, v);
             return;
@@ -2043,8 +2049,7 @@ impl<T: SExp> Program<T> {
 
         let mut produced_code = 0;
         let mut defined_colloquial_names = HashSet::new();
-        let mut handle_def_end = |target_addr: u32,
-                                  defined_colloquial_names: &mut HashSet<String>,
+        let mut handle_def_end = |defined_colloquial_names: &mut HashSet<String>,
                                   function_body: &mut Vec<u8>,
                                   in_function: &mut Option<String>|
          -> Result<(), String> {
@@ -2070,7 +2075,6 @@ impl<T: SExp> Program<T> {
         for i in self.finished_insns.iter() {
             if let Instr::Globl(name) = i {
                 handle_def_end(
-                    self.target_addr,
                     &mut defined_colloquial_names,
                     &mut function_body,
                     &mut in_function,
@@ -2084,7 +2088,6 @@ impl<T: SExp> Program<T> {
         }
 
         handle_def_end(
-            self.target_addr,
             &mut defined_colloquial_names,
             &mut function_body,
             &mut in_function,
@@ -2183,13 +2186,11 @@ impl<T: SExp> Program<T> {
         let dwarf_builder =
             DwarfBuilder::new(filename, elf_output, target_addr, symbol_table.clone());
         let mut p: Program<T> = Program {
-            program,
             finished_insns: Vec::new(),
             first_label: Default::default(),
             env_label: Default::default(),
             encounters_of_code: Default::default(),
             labels_by_hash: Default::default(),
-            done_programs: Default::default(),
             waiting_programs: Default::default(),
             constants: Default::default(),
             symbol_table: Default::default(),

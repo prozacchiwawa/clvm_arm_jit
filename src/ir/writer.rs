@@ -138,54 +138,6 @@ pub fn bigint_from_bytes(b: &[u8], option: Option<TConvertOption>) -> Number {
     unsigned
 }
 
-fn output_with_radix(bits: usize, bytes: &[u8]) -> Vec<u8> {
-    let mut result = Vec::default();
-    let raw_content_bits = 8 * bytes.len();
-    let digit_mask = (1 << bits) - 1;
-    let digits = (raw_content_bits + bits) / bits;
-    let digit_bits = bits * digits;
-    let mut buffer_bit = digit_bits % 8;
-    let mut buffer: u32 = 0;
-
-    if bytes.is_empty() {
-        result.push(b'0');
-        return result;
-    }
-
-    // If the leftmost byte is zero, then we must include a binary or octal digit
-    // to indicate that it should be padded.
-    let mut need_padding = bytes[0] == 0;
-
-    if need_padding && bytes.len() == 1 {
-        result.push(b'0');
-        result.push(b'0');
-        return result;
-    }
-
-    let mut produce_output = false;
-
-    for byte in bytes.iter() {
-        buffer = (buffer << 8) | *byte as u32;
-        buffer_bit += 8;
-        while buffer_bit >= bits {
-            buffer_bit -= bits;
-            let digit_value = (buffer >> buffer_bit) & digit_mask;
-            if digit_value != 0 || need_padding && !produce_output && buffer_bit < bits {
-                produce_output = true;
-                need_padding = false;
-            }
-            if produce_output {
-                result.push(b'0' + (digit_value as u8));
-            }
-        }
-        // Regardless of anything else, start producing output on the second
-        // byte.
-        produce_output = true;
-    }
-
-    result
-}
-
 impl Iterator for IROutputIterator {
     type Item = String;
 

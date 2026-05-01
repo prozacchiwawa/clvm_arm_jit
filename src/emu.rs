@@ -27,8 +27,8 @@ use crate::disassemble::disassemble;
 use crate::sexp::{Number, bi_one, bi_zero, u8_from_number};
 
 use crate::code::{
-    swi_print, Encodable, Instr, Program, Register, NEXT_ALLOC_OFFSET, SWI_DISPATCH_INSTRUCTION,
-    SWI_DISPATCH_NEW_CODE, SWI_DONE, SWI_PRINT_EXPR, SWI_THROW, TARGET_ADDR,
+    Encodable, Instr, Register, NEXT_ALLOC_OFFSET, SWI_DISPATCH_INSTRUCTION,
+    SWI_DISPATCH_NEW_CODE, SWI_DONE, SWI_PRINT_EXPR, SWI_THROW,
 };
 use crate::loader::{ElfLoader, EmuSymbolInfo};
 use crate::mem::{PagedMemory, TargetMemory};
@@ -58,7 +58,6 @@ pub enum ExecMode {
 /// incredibly barebones armv4t-based emulator
 pub struct Emu {
     start_addr: u32,
-    next_module_addr: u32,
 
     // example custom register. only read/written to from the GDB client
     pub custom_reg: u32,
@@ -167,13 +166,13 @@ impl Target for Emu {
     type Arch = gdbstub_arch::arm::Armv4t; // as an example
 
     #[inline(always)]
-    fn base_ops(&mut self) -> BaseOps<Self::Arch, Self::Error> {
+    fn base_ops(&mut self) -> BaseOps<'_, Self::Arch, Self::Error> {
         BaseOps::SingleThread(self)
     }
 
     // opt-in to support for setting/removing breakpoints
     #[inline(always)]
-    fn support_breakpoints(&mut self) -> Option<BreakpointsOps<Self>> {
+    fn support_breakpoints(&mut self) -> Option<BreakpointsOps<'_, Self>> {
         Some(self)
     }
 }
@@ -258,7 +257,7 @@ pub fn generate_argument_refs(
     sexp: NodePtr
 ) -> Result<NodePtr, EvalErr> {
     match allocator.sexp(sexp) {
-        SExp::Pair(a, b) => {
+        SExp::Pair(_a, b) => {
             let next_index = bi_one() + 2_i32.to_bigint().unwrap() * start.clone();
             let tail = generate_argument_refs(allocator, next_index, b.clone())?;
             let new_number = atom_from_number(allocator, &start)?;
@@ -316,7 +315,7 @@ fn is_apply(allocator: &Allocator, sexp: NodePtr) -> bool {
 }
 
 fn is_apply_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
-    if let SExp::Pair(h, t) = allocator.sexp(sexp) {
+    if let SExp::Pair(h, _t) = allocator.sexp(sexp) {
         return is_apply(allocator, h);
     }
 
@@ -331,7 +330,7 @@ fn is_quote(allocator: &Allocator, sexp: NodePtr) -> bool {
 }
 
 fn is_quote_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
-    if let SExp::Pair(h, t) = allocator.sexp(sexp) {
+    if let SExp::Pair(h, _t) = allocator.sexp(sexp) {
         return is_quote(allocator, h);
     }
 
@@ -339,7 +338,7 @@ fn is_quote_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
 }
 
 fn match_printing(allocator: &Allocator, operator: NodePtr, sexp: NodePtr) -> Option<NodePtr> {
-    if let Some(v) = get_number(allocator, sexp) {
+    if let Some(v) = get_number(allocator, operator) {
         if v == 34_u32.to_bigint().unwrap() {
             return is_print_request(allocator, sexp);
         }
@@ -406,7 +405,6 @@ impl Emu {
 
         Ok(Emu {
             start_addr: start_addr,
-            next_module_addr: elf_loader.next_free_addr(),
 
             custom_reg: 0x12345678,
 
@@ -427,14 +425,14 @@ impl Emu {
         })
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.cpu.reg_set(Mode::User, reg::SP, 0xffffff00);
         self.cpu.reg_set(Mode::User, reg::LR, HLE_RETURN_ADDR);
         self.cpu.reg_set(Mode::User, reg::PC, self.start_addr);
         self.cpu.reg_set(Mode::User, reg::CPSR, 0x10);
     }
 
-    pub(crate) fn take_pending_gdb_console_output(&mut self) -> Vec<String> {
+    pub fn take_pending_gdb_console_output(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_gdb_console_output)
     }
 
@@ -567,7 +565,7 @@ impl Emu {
                 return Ok(None);
             }
 
-            if let Some(number) = get_number(&allocator, to_run) {
+            if let Some(_path) = get_number(&allocator, to_run) {
                 // Path retrieval.
                 let new_env_tail = allocator.new_pair(
                     env,
@@ -577,7 +575,7 @@ impl Emu {
                     to_run,
                     new_env_tail,
                 )?;
-                let mut new_apply_atom = allocator.new_atom(&[2])?;
+                let new_apply_atom = allocator.new_atom(&[2])?;
                 if let Some(error) = self.do_apply_op(
                     &mut allocator,
                     new_apply_atom,

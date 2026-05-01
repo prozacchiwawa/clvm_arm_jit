@@ -7,7 +7,7 @@ use crate::sexp::Number;
 
 use clvmr::{Allocator, NodePtr};
 use crate::disassemble::disassemble;
-use crate::sexp::{SExp, SExpValue, bi_zero};
+use crate::sexp::bi_zero;
 
 #[derive(Clone)]
 pub struct ClvmrAllocator {

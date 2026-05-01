@@ -4,19 +4,19 @@ use num_bigint::ToBigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clvmr::{Allocator, ChiaDialect, ClvmFlags, SExp, NodePtr, run_program};
 use clvmr::error::EvalErr;
+use clvmr::{Allocator, ChiaDialect, ClvmFlags, NodePtr, SExp, run_program};
 
-use armv4t_emu::reg;
 use armv4t_emu::Cpu;
 use armv4t_emu::Memory;
 use armv4t_emu::Mode;
+use armv4t_emu::reg;
 use gdbstub::arch::Arch;
 use gdbstub::common::Pid;
 use gdbstub::target::ext::base::singlethread::{
     SingleThreadBase, SingleThreadResume, SingleThreadResumeOps,
 };
-use gdbstub::target::ext::base::{single_register_access, BaseOps};
+use gdbstub::target::ext::base::{BaseOps, single_register_access};
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpointOps, HwWatchpointOps, SwBreakpoint, SwBreakpointOps,
 };
@@ -27,8 +27,8 @@ use crate::disassemble::disassemble;
 use crate::sexp::{Number, bi_one, bi_zero, u8_from_number};
 
 use crate::code::{
-    Encodable, Instr, Register, NEXT_ALLOC_OFFSET, SWI_DISPATCH_INSTRUCTION,
-    SWI_DISPATCH_NEW_CODE, SWI_DONE, SWI_PRINT_EXPR, SWI_THROW,
+    Encodable, Instr, NEXT_ALLOC_OFFSET, Register, SWI_DISPATCH_INSTRUCTION, SWI_DISPATCH_NEW_CODE,
+    SWI_DONE, SWI_PRINT_EXPR, SWI_THROW,
 };
 use crate::loader::{ElfLoader, EmuSymbolInfo};
 use crate::mem::{PagedMemory, TargetMemory};
@@ -254,17 +254,14 @@ pub fn atom_from_number(allocator: &mut Allocator, n: &Number) -> Result<NodePtr
 pub fn generate_argument_refs(
     allocator: &mut Allocator,
     start: Number,
-    sexp: NodePtr
+    sexp: NodePtr,
 ) -> Result<NodePtr, EvalErr> {
     match allocator.sexp(sexp) {
         SExp::Pair(_a, b) => {
             let next_index = bi_one() + 2_i32.to_bigint().unwrap() * start.clone();
             let tail = generate_argument_refs(allocator, next_index, b.clone())?;
             let new_number = atom_from_number(allocator, &start)?;
-            allocator.new_pair(
-                new_number,
-                tail,
-            )
+            allocator.new_pair(new_number, tail)
         }
         _ => Ok(sexp),
     }
@@ -277,23 +274,21 @@ pub fn apply_op(
 ) -> Result<NodePtr, EvalErr> {
     let wrapped_args = allocator.new_pair(allocator.nil(), args.clone())?;
     let generated_refs = generate_argument_refs(allocator, 5_i32.to_bigint().unwrap(), args)?;
-    let application = allocator.new_pair(
-        head.clone(),
-        generated_refs,
-    )?;
+    let application = allocator.new_pair(head.clone(), generated_refs)?;
     Ok(run_program(
         allocator,
         &ChiaDialect::new(ClvmFlags::empty()),
         application,
         wrapped_args,
         MAX_COST,
-    )?.1)
+    )?
+    .1)
 }
 
 fn is_print_atom(allocator: &Allocator, atom: NodePtr) -> bool {
     match allocator.sexp(atom) {
         SExp::Atom => allocator.atom(atom) == clvmr::Atom::Borrowed(b"*print*"),
-        _ => false
+        _ => false,
     }
 }
 
@@ -440,7 +435,7 @@ impl Emu {
         &mut self,
         allocator: &mut Allocator,
         alloc_ptr: u32,
-        sexp: NodePtr
+        sexp: NodePtr,
     ) -> u32 {
         let current_addr = self.mem.read_u32(alloc_ptr);
         match allocator.sexp(sexp) {
@@ -476,11 +471,7 @@ impl Emu {
                 .push(format!("DEBUG: {}", disassemble(allocator, printing)));
             debug = true;
         }
-        match apply_op(
-            allocator,
-            operator.clone(),
-            args.clone(),
-        ) {
+        match apply_op(allocator, operator.clone(), args.clone()) {
             Ok(res) => {
                 // Allocate and write back result.
                 let write_result = self.allocate_and_write(allocator, alloc_ptr, res.clone());
@@ -488,11 +479,7 @@ impl Emu {
                 // Increment pc, we handled the operation.
                 let pc = self.cpu.reg_get(Mode::User, reg::PC);
                 self.cpu.reg_set(Mode::User, reg::PC, pc + 4);
-                if debug {
-                    Some(Event::Output)
-                } else {
-                    None
-                }
+                if debug { Some(Event::Output) } else { None }
             }
             Err(e) => {
                 eprintln!("error simulating instruction: {e:?}");
@@ -567,20 +554,10 @@ impl Emu {
 
             if let Some(_path) = get_number(&allocator, to_run) {
                 // Path retrieval.
-                let new_env_tail = allocator.new_pair(
-                    env,
-                    allocator.nil()
-                )?;
-                let new_expr = allocator.new_pair(
-                    to_run,
-                    new_env_tail,
-                )?;
+                let new_env_tail = allocator.new_pair(env, allocator.nil())?;
+                let new_expr = allocator.new_pair(to_run, new_env_tail)?;
                 let new_apply_atom = allocator.new_atom(&[2])?;
-                if let Some(error) = self.do_apply_op(
-                    &mut allocator,
-                    new_apply_atom,
-                    new_expr,
-                ) {
+                if let Some(error) = self.do_apply_op(&mut allocator, new_apply_atom, new_expr) {
                     return Ok(Some(error));
                 }
                 self.cpu.reg_set(Mode::User, 1, current_pc + 8);

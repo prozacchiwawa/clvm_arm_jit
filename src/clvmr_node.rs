@@ -1,13 +1,13 @@
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::Rc;
-use sha2::{Digest, Sha256};
 
 use crate::sexp::Number;
 
-use clvmr::{Allocator, NodePtr};
 use crate::disassemble::disassemble;
 use crate::sexp::bi_zero;
+use clvmr::{Allocator, NodePtr};
 
 #[derive(Clone)]
 pub struct ClvmrAllocator {
@@ -17,7 +17,7 @@ pub struct ClvmrAllocator {
 impl ClvmrAllocator {
     pub fn with_allocator<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Allocator) -> R
+        F: FnOnce(&Allocator) -> R,
     {
         let ref_imu = (&*self.a).borrow();
         f(&ref_imu)
@@ -25,7 +25,7 @@ impl ClvmrAllocator {
 
     fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut Allocator) -> R
+        F: FnOnce(&mut Allocator) -> R,
     {
         let ref_mut: &mut Allocator = &mut (&*self.a).borrow_mut();
         f(ref_mut)
@@ -34,7 +34,9 @@ impl ClvmrAllocator {
 
 impl Default for ClvmrAllocator {
     fn default() -> Self {
-        ClvmrAllocator { a: Rc::new(RefCell::new(Allocator::new())) }
+        ClvmrAllocator {
+            a: Rc::new(RefCell::new(Allocator::new())),
+        }
     }
 }
 
@@ -47,14 +49,14 @@ pub struct ClvmrWrapper {
 impl ClvmrWrapper {
     pub fn with_allocator<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&Allocator) -> R
+        F: FnOnce(&Allocator) -> R,
     {
         self.a.with_allocator(f)
     }
 
     fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&mut Allocator) -> R
+        F: FnOnce(&mut Allocator) -> R,
     {
         self.a.with_allocator_mut(f)
     }

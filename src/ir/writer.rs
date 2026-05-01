@@ -1,6 +1,6 @@
+use num_bigint::ToBigInt;
 use std::borrow::Borrow;
 use std::rc::Rc;
-use num_bigint::ToBigInt;
 
 use crate::ir::repr::IRRepr;
 use crate::sexp::{Number, bi_one, bi_zero};

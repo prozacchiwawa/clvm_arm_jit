@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use clvmr::{Allocator, NodePtr, SExp};
+use std::rc::Rc;
 
 use crate::ir::repr::IRRepr;
 use crate::ir::writer::IROutputIterator;
@@ -32,9 +32,7 @@ fn has_oversized_sign_extension(data: &[u8]) -> bool {
     false
 }
 
-pub fn ir_for_atom(
-    atom: &[u8],
-) -> IRRepr {
+pub fn ir_for_atom(atom: &[u8]) -> IRRepr {
     if atom.len() == 0 {
         return IRRepr::Null;
     }
@@ -42,7 +40,7 @@ pub fn ir_for_atom(
         if is_printable_string(atom) {
             return IRRepr::Quotes(atom.to_vec());
         } else {
-            return IRRepr::Hex(atom.to_vec())
+            return IRRepr::Hex(atom.to_vec());
         }
     } else {
         // Determine whether the bytes identity an integer in canonical form.
@@ -57,10 +55,7 @@ pub fn ir_for_atom(
 /*
  * (2 2 (2) (2 3 4)) => (a 2 (a) (a 3 4))
  */
-fn disassemble_to_ir(
-    allocator: &Allocator,
-    sexp: NodePtr,
-) -> IRRepr {
+fn disassemble_to_ir(allocator: &Allocator, sexp: NodePtr) -> IRRepr {
     match allocator.sexp(sexp) {
         SExp::Pair(l, r) => {
             let v0 = disassemble_to_ir(allocator, l);

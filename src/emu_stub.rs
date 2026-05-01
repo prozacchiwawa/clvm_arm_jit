@@ -3,11 +3,11 @@
 use gdbstub::common::Signal;
 use gdbstub::conn::Connection;
 use gdbstub::conn::ConnectionExt;
-use gdbstub::stub::run_blocking;
-use gdbstub::stub::state_machine::GdbStubStateMachine;
 use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;
+use gdbstub::stub::run_blocking;
+use gdbstub::stub::state_machine::GdbStubStateMachine;
 use gdbstub::target::Target;
 use std::collections::VecDeque;
 use std::io;
@@ -248,12 +248,8 @@ impl CallbackGdbStub {
         symbols: Rc<std::collections::HashMap<String, String>>,
         output: Box<dyn FnMut(&[u8]) -> Result<(), io::Error>>,
     ) -> Result<Self, String> {
-        let mut emu = Emu::new(
-            elf_bin,
-            crate::code::TARGET_ADDR,
-            symbols,
-        )
-        .map_err(|e| format!("could not create emulator: {e:?}"))?;
+        let mut emu = Emu::new(elf_bin, crate::code::TARGET_ADDR, symbols)
+            .map_err(|e| format!("could not create emulator: {e:?}"))?;
         let connection = CallbackConnection::new(output);
         let gdb = GdbStub::new(connection);
         let state = gdb

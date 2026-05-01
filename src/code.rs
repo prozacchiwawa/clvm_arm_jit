@@ -27,8 +27,11 @@ use target_lexicon::triple;
 
 use crate::loader::ElfLoader;
 use crate::mem::write_u32;
-use crate::sexp::{CreateSExp, Number, SExp, SExpValue, Srcloc, HasSrcloc, bi_one, bi_zero, dequote, is_atom, is_wrapped_atom};
-use crate::shatree::{find_all_by_hash};
+use crate::sexp::{
+    CreateSExp, HasSrcloc, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero, dequote, is_atom,
+    is_wrapped_atom,
+};
+use crate::shatree::find_all_by_hash;
 
 pub const NEXT_ALLOC_OFFSET: i32 = 0;
 
@@ -830,7 +833,10 @@ impl DwarfBuilder {
         self.add_file_having_dirid(dirid, &filename)
     }
 
-    fn synthetic_expr_key<T: SExp+HasSrcloc>(loc: &T::Srcloc, source_sexp: &impl fmt::Display) -> Vec<u8> {
+    fn synthetic_expr_key<T: SExp + HasSrcloc>(
+        loc: &T::Srcloc,
+        source_sexp: &impl fmt::Display,
+    ) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(loc.filename().as_bytes());
         hasher.update((loc.line() as u64).to_le_bytes());
@@ -843,7 +849,7 @@ impl DwarfBuilder {
         hasher.finalize().to_vec()
     }
 
-    fn add_synthetic_line<T: SExp+HasSrcloc>(
+    fn add_synthetic_line<T: SExp + HasSrcloc>(
         &mut self,
         loc: &T::Srcloc,
         source_sexp: &impl fmt::Display,
@@ -876,7 +882,7 @@ impl DwarfBuilder {
         synthetic_source
     }
 
-    fn add_instr<T: SExp+HasSrcloc>(
+    fn add_instr<T: SExp + HasSrcloc>(
         &mut self,
         addr: usize,
         loc: &T::Srcloc,
@@ -1109,7 +1115,7 @@ impl DwarfBuilder {
     }
 
     // Create dwarf traffic needed to ensure that gdb can find the locals.
-    fn decorate_function<T: SExp+HasSrcloc, C: CreateSExp>(
+    fn decorate_function<T: SExp + HasSrcloc, C: CreateSExp>(
         &mut self,
         label: &str,
         addr: usize,
@@ -1356,7 +1362,7 @@ pub fn swi_print(register: usize, label: usize) -> usize {
     SWI_PRINT_EXPR | register << 4 | label << 8
 }
 
-impl<T: SExp+HasSrcloc> Program<T> {
+impl<T: SExp + HasSrcloc> Program<T> {
     fn get_renamed_function_label(&self, hash: &[u8]) -> Option<String> {
         let hash_string = hex::encode(hash);
         self.renamed_symbols.get(&hash_string).cloned()
@@ -1411,7 +1417,7 @@ impl<T: SExp+HasSrcloc> Program<T> {
             _ => self.add_atom(
                 hash,
                 &s.atom_bytes::<T>()
-                    .expect("non-cons debug sexp should atomize")
+                    .expect("non-cons debug sexp should atomize"),
             ),
         }
     }
@@ -1837,10 +1843,24 @@ impl<T: SExp+HasSrcloc> Program<T> {
                 SExpValue::Cons(a, b) => {
                     if let Some(atom) = is_atom(a.clone()) {
                         // do quoted operator
-                        self.do_operator::<C>(&a.loc(), &hash, &atom, b.clone(), false, sexp.clone());
+                        self.do_operator::<C>(
+                            &a.loc(),
+                            &hash,
+                            &atom,
+                            b.clone(),
+                            false,
+                            sexp.clone(),
+                        );
                     } else if let Some((a_val, a)) = is_wrapped_atom(a.clone()) {
                         // do unquoted operator
-                        self.do_operator::<C>(&a_val.loc(), &hash, &a, b.clone(), true, sexp.clone());
+                        self.do_operator::<C>(
+                            &a_val.loc(),
+                            &hash,
+                            &a,
+                            b.clone(),
+                            true,
+                            sexp.clone(),
+                        );
                     } else {
                         // invalid head form, just throw.
                         self.do_throw::<C>(sexp.clone(), &sexp.loc(), &hash);

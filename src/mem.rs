@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use armv4t_emu::Memory;
+use std::collections::HashMap;
 
 pub const NEG: i32 = (-1 * 0x7fffffff) - 1;
 

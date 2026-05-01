@@ -27,8 +27,8 @@ use target_lexicon::triple;
 
 use crate::loader::ElfLoader;
 use crate::mem::write_u32;
-use crate::sexp::{CreateSExp, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero, dequote};
-use crate::shatree::{find_all_by_hash, is_atom, is_wrapped_atom, sha256tree};
+use crate::sexp::{CreateSExp, Number, SExp, SExpValue, Srcloc, HasSrcloc, bi_one, bi_zero, dequote, is_atom, is_wrapped_atom};
+use crate::shatree::{find_all_by_hash};
 
 pub const NEXT_ALLOC_OFFSET: i32 = 0;
 
@@ -830,7 +830,7 @@ impl DwarfBuilder {
         self.add_file_having_dirid(dirid, &filename)
     }
 
-    fn synthetic_expr_key<T: SExp>(loc: &T::Srcloc, source_sexp: &impl fmt::Display) -> Vec<u8> {
+    fn synthetic_expr_key<T: SExp+HasSrcloc>(loc: &T::Srcloc, source_sexp: &impl fmt::Display) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(loc.filename().as_bytes());
         hasher.update((loc.line() as u64).to_le_bytes());
@@ -843,7 +843,7 @@ impl DwarfBuilder {
         hasher.finalize().to_vec()
     }
 
-    fn add_synthetic_line<T: SExp>(
+    fn add_synthetic_line<T: SExp+HasSrcloc>(
         &mut self,
         loc: &T::Srcloc,
         source_sexp: &impl fmt::Display,
@@ -876,7 +876,7 @@ impl DwarfBuilder {
         synthetic_source
     }
 
-    fn add_instr<T: SExp>(
+    fn add_instr<T: SExp+HasSrcloc>(
         &mut self,
         addr: usize,
         loc: &T::Srcloc,
@@ -950,7 +950,7 @@ impl DwarfBuilder {
         row.line = line;
         row.column = col;
         row.is_statement = is_statement;
-        eprintln!("line row {} at {:?}", row.address_offset, loc);
+        eprintln!("line row {} at {}", row.address_offset, loc);
         row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
         let emitted_statement = row.is_statement;
         unit.line_program.generate_row();
@@ -1054,11 +1054,11 @@ impl DwarfBuilder {
     ) {
         eprintln!("add_arguments {here} {path} {args}");
         match args.explode() {
-            SExpValue::Cons(_, a, b) => {
+            SExpValue::Cons(a, b) => {
                 self.add_arguments(subprogram_id, locations, here.clone() << 1, path.clone(), a);
                 self.add_arguments(subprogram_id, locations, here.clone() << 1, path | here, b);
             }
-            SExpValue::Atom(_, a) => {
+            SExpValue::Atom(a) => {
                 let argname = &String::from_utf8_lossy(&a).to_string();
                 let unit = self.dwarf.units.get_mut(self.unit_id);
 
@@ -1109,7 +1109,7 @@ impl DwarfBuilder {
     }
 
     // Create dwarf traffic needed to ensure that gdb can find the locals.
-    fn decorate_function<T: SExp, C: CreateSExp>(
+    fn decorate_function<T: SExp+HasSrcloc, C: CreateSExp>(
         &mut self,
         label: &str,
         addr: usize,
@@ -1356,7 +1356,7 @@ pub fn swi_print(register: usize, label: usize) -> usize {
     SWI_PRINT_EXPR | register << 4 | label << 8
 }
 
-impl<T: SExp> Program<T> {
+impl<T: SExp+HasSrcloc> Program<T> {
     fn get_renamed_function_label(&self, hash: &[u8]) -> Option<String> {
         let hash_string = hex::encode(hash);
         self.renamed_symbols.get(&hash_string).cloned()
@@ -1396,9 +1396,9 @@ impl<T: SExp> Program<T> {
         }
 
         match s.explode() {
-            SExpValue::Cons(_l, a, b) => {
-                let a_hash = sha256tree(a.clone());
-                let b_hash = sha256tree(b.clone());
+            SExpValue::Cons(a, b) => {
+                let a_hash = a.sha256tree();
+                let b_hash = b.sha256tree();
                 let a_label = self.add_sexp(loc, &a_hash, a);
                 let b_label = self.add_sexp(loc, &b_hash, b);
                 let label = format!("_{}", hexify(hash));
@@ -1412,7 +1412,6 @@ impl<T: SExp> Program<T> {
                 hash,
                 &s.atom_bytes::<T>()
                     .expect("non-cons debug sexp should atomize")
-                    .1,
             ),
         }
     }
@@ -1472,7 +1471,7 @@ impl<T: SExp> Program<T> {
         if a == &[1] {
             eprintln!("do_operator, quoted {b}");
             self.add(b.clone());
-            let b_hash = sha256tree(b.clone());
+            let b_hash = b.sha256tree();
             return self.load_sexp::<C>(source_sexp, loc, &b_hash, b);
         }
 
@@ -1595,7 +1594,7 @@ impl<T: SExp> Program<T> {
         } else {
             // Ensure we have this sexp loadable as data.
             let operator_sexp = C::atom::<T>(loc.clone(), a);
-            let atom_hash = sha256tree(operator_sexp.clone());
+            let atom_hash = operator_sexp.sha256tree();
             let label = self.add_atom(&atom_hash, a);
             eprintln!("load {label} for general operator {operator_sexp}\n");
 
@@ -1715,7 +1714,7 @@ impl<T: SExp> Program<T> {
     }
 
     fn add(&mut self, sexp: T) -> String {
-        let hash = sha256tree(sexp.clone());
+        let hash = sexp.sha256tree();
         if let Some(existing_label) = self.labels_by_hash.get(&hash) {
             return existing_label.clone();
         }
@@ -1807,8 +1806,8 @@ impl<T: SExp> Program<T> {
 
     fn emit_waiting<C: CreateSExp>(&mut self) {
         while let Some((label, sexp)) = self.waiting_programs.pop() {
-            eprintln!("{} sexp {:?} {}", label, sexp.loc(), sexp);
-            let hash = sha256tree(sexp.clone());
+            eprintln!("{} sexp {} {}", label, sexp.loc(), sexp);
+            let hash = sexp.sha256tree();
 
             self.labels_by_hash.insert(hash.clone(), label.clone());
             self.dwarf_builder.start(self.current_addr);
@@ -1835,24 +1834,24 @@ impl<T: SExp> Program<T> {
 
             // Translate body.
             match sexp.explode() {
-                SExpValue::Cons(l, a, b) => {
-                    if let Some((loc, a)) = is_atom(a.clone()) {
+                SExpValue::Cons(a, b) => {
+                    if let Some(atom) = is_atom(a.clone()) {
                         // do quoted operator
-                        self.do_operator::<C>(&loc, &hash, &a, b.clone(), false, sexp.clone());
-                    } else if let Some((loc, a)) = is_wrapped_atom(a.clone()) {
+                        self.do_operator::<C>(&a.loc(), &hash, &atom, b.clone(), false, sexp.clone());
+                    } else if let Some((a_val, a)) = is_wrapped_atom(a.clone()) {
                         // do unquoted operator
-                        self.do_operator::<C>(&loc, &hash, &a, b.clone(), true, sexp.clone());
+                        self.do_operator::<C>(&a_val.loc(), &hash, &a, b.clone(), true, sexp.clone());
                     } else {
                         // invalid head form, just throw.
-                        self.do_throw::<C>(sexp.clone(), &l, &hash);
+                        self.do_throw::<C>(sexp.clone(), &sexp.loc(), &hash);
                     }
                 }
-                SExpValue::Nil(l) => self.load_atom::<C>(sexp.clone(), &l, &hash, &[]),
-                SExpValue::Atom(l, v) => {
+                SExpValue::Nil => self.load_atom::<C>(sexp.clone(), &sexp.loc(), &hash, &[]),
+                SExpValue::Atom(v) => {
                     if v.is_empty() {
-                        return self.load_atom::<C>(sexp.clone(), &l, &hash, &[]);
+                        return self.load_atom::<C>(sexp.clone(), &sexp.loc(), &hash, &[]);
                     }
-                    self.env_select::<C>(sexp.clone(), &l, &hash, &v);
+                    self.env_select::<C>(sexp.clone(), &sexp.loc(), &hash, &v);
                 }
             }
 
@@ -2206,7 +2205,7 @@ impl<T: SExp> Program<T> {
 
         p.symbol_table = symbol_table;
         let loc = T::Srcloc::start("*env*");
-        let envhash = sha256tree(env.clone());
+        let envhash = sexp.sha256tree();
         for (remap_hash, name, remap_sexp) in remap_hashes.into_iter() {
             let remap_hash_hex = hex::encode(&remap_hash);
             eprintln!("should remap hash {} to {name}", remap_hash_hex);

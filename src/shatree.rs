@@ -1,56 +1,8 @@
 use crate::sexp::{SExp, SExpValue};
 use sha2::{Digest, Sha256};
 
-pub fn sha256tree<T: SExp>(sexp: T) -> Vec<u8> {
-    match sexp.explode() {
-        SExpValue::Cons(_, left, right) => {
-            let hash_left = sha256tree(left);
-            let hash_right = sha256tree(right);
-            let mut hasher = Sha256::new();
-            hasher.update([2]);
-            hasher.update(hash_left);
-            hasher.update(hash_right);
-            hasher.finalize().to_vec()
-        }
-        _ => {
-            let (_, bytes) = sexp
-                .atom_bytes::<T>()
-                .expect("non-cons debug sexp should atomize");
-            let mut hasher = Sha256::new();
-            hasher.update([1]);
-            hasher.update(bytes);
-            hasher.finalize().to_vec()
-        }
-    }
-}
-
-pub fn truthy<T: SExp>(sexp: T) -> bool {
-    !sexp.nilp()
-}
-
-pub fn is_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
-    sexp.atom_bytes::<T>()
-}
-
-pub fn is_wrapped_atom<T: SExp>(sexp: T) -> Option<(T::Srcloc, Vec<u8>)> {
-    match sexp.explode() {
-        SExpValue::Cons(_, left, right) => {
-            let (loc, atom) = match left.explode() {
-                SExpValue::Atom(loc, atom) => (loc, atom),
-                _ => return None,
-            };
-            if truthy(right) {
-                None
-            } else {
-                Some((loc, atom))
-            }
-        }
-        _ => None,
-    }
-}
-
 fn collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u8> {
-    if let SExpValue::Cons(_, left, right) = sexp.explode() {
+    if let SExpValue::Cons(left, right) = sexp.explode() {
         let hash_left = collect_by_hash(hash, left, matches);
         let hash_right = collect_by_hash(hash, right, matches);
         let mut hasher = Sha256::new();
@@ -63,7 +15,7 @@ fn collect_by_hash<T: SExp>(hash: &[u8], sexp: T, matches: &mut Vec<T>) -> Vec<u
         }
         my_hash
     } else {
-        let the_hash = sha256tree(sexp.clone());
+        let the_hash = sexp.sha256tree();
         if the_hash == hash {
             matches.push(sexp);
         }

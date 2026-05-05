@@ -2242,7 +2242,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
         let patches = create_patches(&mut result_buf);
 
-        for (i, (target, value)) in patches.into_iter().enumerate() {
+        for (target, value) in patches.into_iter() {
             write_u32(&mut result_buf, target, value);
         }
 

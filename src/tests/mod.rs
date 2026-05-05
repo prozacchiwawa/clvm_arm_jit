@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::fs;
 use std::rc::Rc;
 
 use clvmr::Allocator;
+use chialisp::classic::clvm_tools::binutils::disassemble;
 use chialisp::classic::clvm_tools::stages::stage_0::{DefaultProgramRunner, TRunProgram};
 use chialisp::compiler::clvm::convert_from_clvm_rs;
 use chialisp::compiler::comptypes::CompilerOpts;
@@ -73,28 +75,29 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
     }))
 }
 
-/*
 #[test]
 fn test_run_to_exit_and_return_nil() {
-    let elf = fs::read("resources/tests/armjit/return_nil.elf").expect("should exist");
-    let result = Emu::run_to_exit(&elf, TARGET_ADDR, Rc::new(HashMap::default()))
+    let mut allocator = Allocator::new();
+    let elf = fs::read("resources/tests/return_nil.elf").expect("should exist");
+    let result = Emu::run_to_exit(&mut allocator, &elf, TARGET_ADDR, Rc::new(HashMap::default()))
         .expect("should load")
         .unwrap();
-    assert_eq!(result.to_string(), "()");
+    assert_eq!(disassemble(&allocator, result, None), "()");
 }
 
 #[test]
 fn test_run_to_exit_and_return_pair() {
-    let elf = fs::read("resources/tests/armjit/return_cons.elf").expect("should exist");
-    let result = Emu::run_to_exit(&elf, TARGET_ADDR, Rc::new(HashMap::default()))
+    let mut allocator = Allocator::new();
+    let elf = fs::read("resources/tests/return_cons.elf").expect("should exist");
+    let result = Emu::run_to_exit(&mut allocator, &elf, TARGET_ADDR, Rc::new(HashMap::default()))
         .expect("should load")
         .unwrap();
-    assert_eq!(result.to_string(), "(hi . there)");
+    assert_eq!(disassemble(&allocator, result, None), "(26729 . \"there\")");
 }
 
 #[test]
 fn test_compile_and_run_simple_quoted_atom() {
-    let result = Emu::compile_and_run("test.clsp", "(mod () \"hi there\")", "()")
+    let result = compile_and_run("test.clsp", "(mod () \"hi there\")", "()")
         .expect("should run")
         .unwrap();
     assert_eq!(
@@ -105,31 +108,31 @@ fn test_compile_and_run_simple_quoted_atom() {
 
 #[test]
 fn test_compile_and_run_cons() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (c \"hi\" \"there\"))",
         "()",
     )
     .expect("should run")
     .unwrap();
-    assert_eq!(result.to_string(), "(hi . there)");
+    assert_eq!(result.to_string(), "(26729 . 499967685221)");
 }
 
 #[test]
 fn test_compile_and_run_apply_simple_1() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (a 1 (q . \"toot\")))",
         "()",
     )
     .expect("should run")
     .unwrap();
-    assert_eq!(result.to_string(), "toot");
+    assert_eq!(result.to_string(), "1953460084");
 }
 
 #[test]
 fn test_compile_and_run_apply_simple_2() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (a 1 @))",
         "37777",
@@ -141,7 +144,7 @@ fn test_compile_and_run_apply_simple_2() {
 
 #[test]
 fn test_compile_and_run_apply_simple_3() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (a (q 4 (1 . 1) (1 . 2)) @))",
         "()",
@@ -153,7 +156,7 @@ fn test_compile_and_run_apply_simple_3() {
 
 #[test]
 fn test_compile_and_run_apply_simple_4() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (f (q 1 2)))",
         "()",
@@ -165,7 +168,7 @@ fn test_compile_and_run_apply_simple_4() {
 
 #[test]
 fn test_compile_and_run_apply_simple_4_fail() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (f 99))",
         "()",
@@ -176,7 +179,7 @@ fn test_compile_and_run_apply_simple_4_fail() {
 
 #[test]
 fn test_compile_and_run_apply_simple_5() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (r (q 1 2)))",
         "()",
@@ -188,7 +191,7 @@ fn test_compile_and_run_apply_simple_5() {
 
 #[test]
 fn test_compile_and_run_apply_simple_6() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod () (include *standard-cl-23*) (r 99))",
         "()",
@@ -199,7 +202,7 @@ fn test_compile_and_run_apply_simple_6() {
 
 #[test]
 fn test_compile_and_run_apply_at() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod (A) (include *standard-cl-23*) @)",
         "(19)",
@@ -211,7 +214,7 @@ fn test_compile_and_run_apply_at() {
 
 #[test]
 fn test_compile_and_run_apply_path() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod (A) (include *standard-cl-23*) A)",
         "(19)",
@@ -223,7 +226,7 @@ fn test_compile_and_run_apply_path() {
 
 #[test]
 fn test_compile_and_run_apply_simple_op() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod (A B) (include *standard-cl-23*) (+ A B))",
         "(99 103)",
@@ -235,7 +238,7 @@ fn test_compile_and_run_apply_simple_op() {
 
 #[test]
 fn test_compile_and_run_apply_simple_op1() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod (A B) (include *standard-cl-23*) (+ 1 A B))",
         "(99 103)",
@@ -247,7 +250,7 @@ fn test_compile_and_run_apply_simple_op1() {
 
 #[test]
 fn test_compile_and_run_apply_simple_function_0() {
-    let result = Emu::compile_and_run(
+    let result = compile_and_run(
         "test.clsp",
         "(mod (A B) (include *standard-cl-23*) (defun F (A B) (+ 1 A B)) (F A B))",
         "(99 103)",
@@ -256,7 +259,6 @@ fn test_compile_and_run_apply_simple_function_0() {
     .unwrap();
     assert_eq!(result.to_string(), "203");
 }
-*/
 
 #[test]
 fn test_compile_and_run_apply_function_1() {

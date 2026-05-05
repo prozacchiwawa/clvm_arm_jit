@@ -23,12 +23,12 @@ impl ClvmrAllocator {
         f(&ref_imu)
     }
 
-    fn with_allocator_mut<F, R>(&self, f: F) -> R
+    pub fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Allocator) -> R,
     {
-        let ref_mut: &mut Allocator = &mut (&*self.a).borrow_mut();
-        f(ref_mut)
+        let mut ref_mut = (&*self.a).borrow_mut();
+        f(&mut ref_mut)
     }
 }
 

@@ -1115,7 +1115,7 @@ impl DwarfBuilder {
     }
 
     // Create dwarf traffic needed to ensure that gdb can find the locals.
-    fn decorate_function<T: SExp + HasSrcloc, C: CreateSExp>(
+    fn decorate_function<T: SExp + HasSrcloc, C: CreateSExp<T>>(
         &mut self,
         label: &str,
         addr: usize,
@@ -1217,7 +1217,7 @@ impl DwarfBuilder {
         };
         eprintln!("about to parse args");
         let srcloc = T::Srcloc::start("*args*");
-        if let Ok(parsed) = C::parse_sexp::<T, _>(srcloc.clone(), args.bytes()) {
+        if let Ok(parsed) = C::parse_sexp::<_>(srcloc.clone(), args.bytes()) {
             let self_u32_type = self.u32_type;
             let early_reg_closure = move || {
                 let mut early_reg_expr = Expression::new();
@@ -1498,7 +1498,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         return format!("_{}_{n}", hexify(hash));
     }
 
-    fn do_throw<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8]) {
+    fn do_throw<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8]) {
         self.load_atom::<C>(source_sexp.clone(), loc, hash, hash);
         self.push::<C>(source_sexp.clone(), loc, Instr::Swi(SWI_PRINT_EXPR));
         self.push::<C>(source_sexp, loc, Instr::Swi(SWI_THROW));
@@ -1530,12 +1530,12 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn load_sexp<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], s: T) {
+    fn load_sexp<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], s: T) {
         let label = self.add_sexp(loc, hash, s);
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn first_rest<C: CreateSExp>(
+    fn first_rest<C: CreateSExp<T>>(
         &mut self,
         source_sexp: T,
         loc: &T::Srcloc,
@@ -1564,7 +1564,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn do_operator<C: CreateSExp>(
+    fn do_operator<C: CreateSExp<T>>(
         &mut self,
         loc: &T::Srcloc,
         hash: &[u8],
@@ -1707,7 +1707,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
             return self.first_rest::<C>(source_sexp, loc, hash, &lst, 4);
         } else {
             // Ensure we have this sexp loadable as data.
-            let operator_sexp = C::atom::<T>(loc.clone(), a);
+            let operator_sexp = C::atom(loc.clone(), a);
             let atom_hash = operator_sexp.sha256tree();
             let label = self.add_atom(&atom_hash, a);
             eprintln!("load {label} for general operator {operator_sexp}\n");
@@ -1759,7 +1759,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
     }
 
     // R0 = the address of the env block.
-    fn env_select<C: CreateSExp>(
+    fn env_select<C: CreateSExp<T>>(
         &mut self,
         source_sexp: T,
         loc: &T::Srcloc,
@@ -1822,7 +1822,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         label
     }
 
-    fn load_atom<C: CreateSExp>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
+    fn load_atom<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
         let label = self.add_atom(hash, v);
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
@@ -1847,7 +1847,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         body_label
     }
 
-    fn push_be<C: CreateSExp>(
+    fn push_be<C: CreateSExp<T>>(
         &mut self,
         source_sexp: T,
         srcloc: &T::Srcloc,
@@ -1914,11 +1914,11 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn push<C: CreateSExp>(&mut self, source_sexp: T, srcloc: &T::Srcloc, instr: Instr) {
+    fn push<C: CreateSExp<T>>(&mut self, source_sexp: T, srcloc: &T::Srcloc, instr: Instr) {
         self.push_be::<C>(source_sexp, srcloc, instr, None);
     }
 
-    fn emit_waiting<C: CreateSExp>(&mut self) {
+    fn emit_waiting<C: CreateSExp<T>>(&mut self) {
         while let Some((label, sexp)) = self.waiting_programs.pop() {
             eprintln!("{} sexp {} {}", label, sexp.loc(), sexp);
             let hash = sexp.sha256tree();
@@ -2004,9 +2004,9 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn start_insns<C: CreateSExp>(&mut self) {
+    fn start_insns<C: CreateSExp<T>>(&mut self) {
         let srcloc = T::Srcloc::start("*prolog*");
-        let source_sexp = C::atom::<T>(srcloc.clone(), b"prolog");
+        let source_sexp = C::atom(srcloc.clone(), b"prolog");
         for i in &[
             Instr::Section(".text".to_string()),
             Instr::Align4,
@@ -2024,9 +2024,9 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn finish_insns<C: CreateSExp>(&mut self) -> Result<(), String> {
+    fn finish_insns<C: CreateSExp<T>>(&mut self) -> Result<(), String> {
         let srcloc = T::Srcloc::start("*epilog*");
-        let source_sexp = C::atom::<T>(srcloc.clone(), b"epilog");
+        let source_sexp = C::atom(srcloc.clone(), b"epilog");
         let mut constants = HashMap::new();
         swap(&mut constants, &mut self.constants);
 
@@ -2275,7 +2275,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         })
     }
 
-    pub fn new<C: CreateSExp>(
+    pub fn new<C: CreateSExp<T>>(
         program: HashMap<String, T::Srcloc>,
         filename: &str,
         elf_output: &str,

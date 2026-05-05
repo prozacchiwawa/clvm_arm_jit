@@ -23,6 +23,7 @@ impl ClvmrAllocator {
         f(&ref_imu)
     }
 
+    #[cfg(test)]
     pub fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Allocator) -> R,
@@ -54,6 +55,7 @@ impl ClvmrWrapper {
         self.a.with_allocator(f)
     }
 
+    #[cfg(test)]
     fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Allocator) -> R,

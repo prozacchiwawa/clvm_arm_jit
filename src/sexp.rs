@@ -63,11 +63,11 @@ pub trait HasSrcloc {
     fn loc(&self) -> Self::Srcloc;
 }
 
-pub trait CreateSExp {
-    fn atom<S: SExp + HasSrcloc>(loc: S::Srcloc, bytes: &[u8]) -> S;
-    fn cons<S: SExp + HasSrcloc>(loc: S::Srcloc, a: S, b: S) -> S;
+pub trait CreateSExp<S: SExp + HasSrcloc> {
+    fn atom(loc: S::Srcloc, bytes: &[u8]) -> S;
+    fn cons(loc: S::Srcloc, a: S, b: S) -> S;
 
-    fn parse_sexp<S: SExp + HasSrcloc, I>(
+    fn parse_sexp<I>(
         start: S::Srcloc,
         input: I,
     ) -> Result<Vec<S>, (S::Srcloc, String)>

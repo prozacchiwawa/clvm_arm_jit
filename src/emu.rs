@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use clvmr::error::EvalErr;
-use clvmr::{Allocator, ChiaDialect, ClvmFlags, NodePtr, SExp, run_program};
+use clvmr::{Allocator, ChiaDialect, NodePtr, SExp, run_program};
 
 use armv4t_emu::Cpu;
 use armv4t_emu::Memory;
@@ -277,7 +277,7 @@ pub fn apply_op(
     let application = allocator.new_pair(head.clone(), generated_refs)?;
     Ok(run_program(
         allocator,
-        &ChiaDialect::new(ClvmFlags::empty()),
+        &ChiaDialect::new(0),
         application,
         wrapped_args,
         MAX_COST,
@@ -857,7 +857,7 @@ impl Emu {
 
 impl Emu {
     /// Get an SExp at a specific address.
-    fn get_sexp(&self, allocator: &mut Allocator, addr: u32) -> Result<NodePtr, EvalErr> {
+    pub fn get_sexp(&self, allocator: &mut Allocator, addr: u32) -> Result<NodePtr, EvalErr> {
         if addr == 0 {
             return Ok(allocator.nil());
         }
@@ -878,14 +878,14 @@ impl Emu {
 
     /// Run to completion and return a value by address for tests.
     #[cfg(test)]
-    fn run_to_exit(
+    pub fn run_to_exit(
         allocator: &mut Allocator,
         program: &[u8],
         start_addr: u32,
         clvm_symbols: Rc<HashMap<String, String>>,
     ) -> DynResult<Option<NodePtr>> {
         let mut emu = Emu::new(program, start_addr, clvm_symbols)?;
-        let mut elf_loader = ElfLoader::new(program, start_addr).expect("should load");
+        let elf_loader = ElfLoader::new(program, start_addr).expect("should load");
         elf_loader.load(&mut emu.mem);
 
         loop {
@@ -903,203 +903,6 @@ impl Emu {
         }
     }
 }
-
-/*
-#[test]
-fn test_run_to_exit_and_return_nil() {
-    let elf = fs::read("resources/tests/armjit/return_nil.elf").expect("should exist");
-    let result = Emu::run_to_exit(&elf, TARGET_ADDR, Rc::new(HashMap::default()))
-        .expect("should load")
-        .unwrap();
-    assert_eq!(result.to_string(), "()");
-}
-
-#[test]
-fn test_run_to_exit_and_return_pair() {
-    let elf = fs::read("resources/tests/armjit/return_cons.elf").expect("should exist");
-    let result = Emu::run_to_exit(&elf, TARGET_ADDR, Rc::new(HashMap::default()))
-        .expect("should load")
-        .unwrap();
-    assert_eq!(result.to_string(), "(hi . there)");
-}
-
-#[test]
-fn test_compile_and_run_simple_quoted_atom() {
-    let result = Emu::compile_and_run("test.clsp", "(mod () \"hi there\")", "()")
-        .expect("should run")
-        .unwrap();
-    assert_eq!(
-        result,
-        Rc::new(SExp::Atom(Srcloc::start("*test*"), b"hi there".to_vec()))
-    );
-}
-
-#[test]
-fn test_compile_and_run_cons() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (c \"hi\" \"there\"))",
-        "()",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "(hi . there)");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_1() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (a 1 (q . \"toot\")))",
-        "()",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "toot");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_2() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (a 1 @))",
-        "37777",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "37777");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_3() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (a (q 4 (1 . 1) (1 . 2)) @))",
-        "()",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "(1 . 2)");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_4() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (f (q 1 2)))",
-        "()",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "1");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_4_fail() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (f 99))",
-        "()",
-    )
-    .expect("should run");
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_5() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (r (q 1 2)))",
-        "()",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "(2)");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_6() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod () (include *standard-cl-23*) (r 99))",
-        "()",
-    )
-    .expect("should run");
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_compile_and_run_apply_at() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A) (include *standard-cl-23*) @)",
-        "(19)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "(19)");
-}
-
-#[test]
-fn test_compile_and_run_apply_path() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A) (include *standard-cl-23*) A)",
-        "(19)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "19");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_op() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A B) (include *standard-cl-23*) (+ A B))",
-        "(99 103)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "202");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_op1() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A B) (include *standard-cl-23*) (+ 1 A B))",
-        "(99 103)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "203");
-}
-
-#[test]
-fn test_compile_and_run_apply_simple_function_0() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A B) (include *standard-cl-23*) (defun F (A B) (+ 1 A B)) (F A B))",
-        "(99 103)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "203");
-}
-
-#[test]
-fn test_compile_and_run_apply_function_1() {
-    let result = Emu::compile_and_run(
-        "test.clsp",
-        "(mod (A) (include *standard-cl-23*) (defun F (A) (+ 1 A)) (F A))",
-        "(17)",
-    )
-    .expect("should run")
-    .unwrap();
-    assert_eq!(result.to_string(), "18");
-}
-*/
 
 pub enum RunEvent {
     IncomingData,

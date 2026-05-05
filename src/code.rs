@@ -956,7 +956,6 @@ impl DwarfBuilder {
         row.line = line;
         row.column = col;
         row.is_statement = is_statement;
-        eprintln!("line row {} at {}", row.address_offset, loc);
         row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
         let emitted_statement = row.is_statement;
         unit.line_program.generate_row();
@@ -1025,7 +1024,6 @@ impl DwarfBuilder {
             } else {
                 false
             };
-            eprintln!("{name} left_env {left_env}");
             stripped.append(&mut b"_arguments".to_vec());
             let args = self
                 .symbol_table
@@ -1058,7 +1056,6 @@ impl DwarfBuilder {
         path: Number,
         args: T,
     ) {
-        eprintln!("add_arguments {here} {path} {args}");
         match args.explode() {
             SExpValue::Cons(a, b) => {
                 self.add_arguments(subprogram_id, locations, here.clone() << 1, path.clone(), a);
@@ -1166,7 +1163,6 @@ impl DwarfBuilder {
         // We'll make 3 subprograms to represent where the current arguments can be arrived
         // at from, then decorate all of them with the argument retriever below.
 
-        eprintln!("get subprogram");
         let mut subprogram_names = vec![name.clone()];
         if name != label {
             // Keep a typed DIE for both the colloquial and emitted symbol names so
@@ -1215,7 +1211,6 @@ impl DwarfBuilder {
             }
             subprogram_ids
         };
-        eprintln!("about to parse args");
         let srcloc = T::Srcloc::start("*args*");
         if let Ok(parsed) = C::parse_sexp::<_>(srcloc.clone(), args.bytes()) {
             let self_u32_type = self.u32_type;
@@ -1261,7 +1256,6 @@ impl DwarfBuilder {
             }
         }
 
-        eprintln!("function {name}");
         Some(name)
     }
 
@@ -1329,6 +1323,7 @@ pub struct Program<T: SExp> {
     env_label: String,
     encounters_of_code: HashMap<Vec<u8>, usize>,
     labels_by_hash: HashMap<Vec<u8>, String>,
+    code_to_hash: HashMap<String, String>,
     waiting_programs: Vec<(String, T)>,
     constants: HashMap<Vec<u8>, Constant>,
     symbol_table: Rc<HashMap<String, String>>,
@@ -1583,7 +1578,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
         // Quote is special.
         if a == &[1] {
-            eprintln!("do_operator, quoted {b}");
             self.add(b.clone());
             let b_hash = b.sha256tree();
             return self.load_sexp::<C>(source_sexp, loc, &b_hash, b);
@@ -1710,7 +1704,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
             let operator_sexp = C::atom(loc.clone(), a);
             let atom_hash = operator_sexp.sha256tree();
             let label = self.add_atom(&atom_hash, a);
-            eprintln!("load {label} for general operator {operator_sexp}\n");
 
             // Load a nil into R4.
             for i in &[Instr::Andi(Register::R(4), Register::R(4), 0)] {
@@ -1719,7 +1712,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
             // For each subexpression, call it and replace R4 with (cons R0 R4)
             for item in lst.iter().rev() {
-                eprintln!("load clause {item} for operator {operator_sexp}");
                 let clause_label = self.add(item.clone());
                 for i in &[
                     // Load the allocator ptr into R0.
@@ -1839,8 +1831,8 @@ impl<T: SExp + HasSrcloc> Program<T> {
             .get_renamed_function_label(&hash)
             .filter(|label| !self.label_is_taken(label))
             .unwrap_or(generated_body_label);
-        eprintln!("label {body_label} for {sexp} at {}", sexp.loc());
 
+        self.code_to_hash.insert(sexp.to_string(), body_label.clone());
         self.labels_by_hash.insert(hash, body_label.clone());
         self.waiting_programs
             .push((body_label.clone(), sexp.clone()));
@@ -1857,7 +1849,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
         let size = instr.size(self.current_addr);
 
         let insert_instr = if let Instr::Globl(g) = &instr {
-            eprintln!("instr {instr:?}");
             // Two things: ensure we switch to real function names when we
             // have them.
             //
@@ -1882,10 +1873,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
         if end_block {
             self.current_addr = (self.current_addr + 15) & !15;
             if let Some(label) = self.current_symbol.as_ref() {
-                eprintln!(
-                    "end block for label {label} {:x}-{:x}",
-                    self.start_addr, self.current_addr
-                );
                 let preferred_name = self.current_symbol_name.clone();
                 if let Some(function_name) = self.dwarf_builder.decorate_function::<T, C>(
                     label,
@@ -1893,7 +1880,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
                     self.current_addr - self.start_addr,
                     preferred_name.as_deref(),
                 ) {
-                    eprintln!("end block with function {function_name}");
                     self.function_symbols.insert(label.clone(), function_name);
                 }
                 self.current_symbol = None;
@@ -1920,7 +1906,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
     fn emit_waiting<C: CreateSExp<T>>(&mut self) {
         while let Some((label, sexp)) = self.waiting_programs.pop() {
-            eprintln!("{} sexp {} {}", label, sexp.loc(), sexp);
             let hash = sexp.sha256tree();
 
             self.labels_by_hash.insert(hash.clone(), label.clone());
@@ -2048,7 +2033,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
         for (_, c) in constants.iter() {
             match c {
                 Constant::Cons(label, a_label, b_label) => {
-                    eprintln!("constant pair {label}");
                     for i in &[
                         Instr::Align4,
                         Instr::Globl(label.clone()),
@@ -2129,14 +2113,12 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         // Predefined.
                         return None;
                     } else {
-                        eprintln!("data section {name}");
                         waiting_for_debug_info = None;
                         data_section = true;
                         return None;
                     }
                 } else if let Instr::Globl(name) = i {
                     if data_section {
-                        eprintln!("data label {name}");
                         data = name.clone();
                         return Some((data.clone(), Decl::data().global().into()));
                     } else {
@@ -2188,7 +2170,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
                             defined_colloquial_names.insert(funname.clone());
                         }
                     }
-                    eprintln!("obj define {defname}");
                     produced_code += function_body.len();
                     obj.define(defname, function_body.clone())
                         .map_err(|e| format!("{e:?}"))?;
@@ -2226,10 +2207,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
         write_u32(&mut debug_aranges, 6, 0);
         debug_aranges[10] = 4;
         write_u32(&mut debug_aranges, 16, self.target_addr);
-        eprintln!(
-            "produced_code {produced_code} target_addr {}",
-            self.target_addr
-        );
         write_u32(&mut debug_aranges, 20, produced_code as u32);
         sections.push((".debug_aranges".to_string(), debug_aranges));
 
@@ -2239,9 +2216,16 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
 
         for r in relocations.iter() {
+            let resolved_target =
+                if let Some(code_to_hash) = self.code_to_hash.get(&r.reloc_target) {
+                    code_to_hash.clone()
+                } else {
+                    r.reloc_target.clone()
+                };
+
             obj.link(Link {
                 from: &r.function,
-                to: &r.reloc_target,
+                to: &resolved_target,
                 at: r.code_location as u64,
             })
             .map_err(|e| format!("link {e:?}"))?;
@@ -2251,24 +2235,19 @@ impl<T: SExp + HasSrcloc> Program<T> {
         mark_elf_executable(&mut result_buf, self.target_addr)?;
 
         // Patch up
-        eprintln!("reload elf");
         let create_patches = |result_buf: &mut [u8]| {
             let elf_loader = ElfLoader::new(result_buf, self.target_addr).expect("should load");
             elf_loader.patch_sections()
         };
 
-        eprintln!("create patches");
         let patches = create_patches(&mut result_buf);
-        eprintln!("patches made");
 
         for (i, (target, value)) in patches.into_iter().enumerate() {
-            eprintln!("section {i} target {target:x} value {value:x}");
             write_u32(&mut result_buf, target, value);
         }
 
         add_elf_load_segment(&mut result_buf)?;
 
-        eprintln!("code succeeded");
         Ok(ElfObject {
             object_file: result_buf,
             synthetic_source,
@@ -2321,6 +2300,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
             env_label: Default::default(),
             encounters_of_code: Default::default(),
             labels_by_hash: Default::default(),
+            code_to_hash: Default::default(),
             waiting_programs: Default::default(),
             constants: Default::default(),
             symbol_table: Default::default(),
@@ -2339,12 +2319,9 @@ impl<T: SExp + HasSrcloc> Program<T> {
         let envhash = sexp.sha256tree();
         for (remap_hash, name, remap_sexp) in remap_hashes.into_iter() {
             let remap_hash_hex = hex::encode(&remap_hash);
-            eprintln!("should remap hash {} to {name}", remap_hash_hex);
             p.renamed_symbols
                 .insert(remap_hash_hex.clone(), name.clone());
             p.add_sexp(&remap_sexp.loc(), &remap_hash, remap_sexp.clone());
-            let remap_label = p.add(remap_sexp);
-            eprintln!("remap selected label {remap_label} for {name}");
         }
         p.first_label = p.add(sexp.clone());
         p.start_insns::<C>();

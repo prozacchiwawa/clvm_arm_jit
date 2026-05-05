@@ -6,8 +6,8 @@ use chialisp::compiler::sexp::{SExp, parse_sexp};
 use chialisp::compiler::srcloc::Srcloc;
 use chialisp::util::Number;
 
-use crate::sexp::{SExpValue, Until, bi_zero};
 use crate::sexp;
+use crate::sexp::{SExpValue, Until, bi_zero};
 
 impl sexp::SExp for Rc<SExp> {
     fn sha256tree(&self) -> Vec<u8> {
@@ -40,16 +40,16 @@ impl sexp::SExp for Rc<SExp> {
     fn explode(&self) -> SExpValue<Self> {
         match self.as_ref() {
             SExp::Nil(_loc) => SExpValue::Nil,
-            SExp::Cons(_loc, left, right) => {
-                SExpValue::Cons(left.clone(), right.clone())
-            }
+            SExp::Cons(_loc, left, right) => SExpValue::Cons(left.clone(), right.clone()),
             SExp::Integer(_loc, i) => {
                 if *i == bi_zero() {
                     return SExpValue::Nil;
                 }
                 SExpValue::Atom(bigint_to_bytes_clvm(i).data().clone())
             }
-            SExp::QuotedString(_loc, _, bytes) | SExp::Atom(_loc, bytes) => SExpValue::Atom(bytes.clone()),
+            SExp::QuotedString(_loc, _, bytes) | SExp::Atom(_loc, bytes) => {
+                SExpValue::Atom(bytes.clone())
+            }
         }
     }
 }
@@ -88,7 +88,6 @@ impl sexp::HasSrcloc for Rc<SExp> {
     fn loc(&self) -> Srcloc {
         self.as_ref().loc()
     }
-
 }
 
 pub struct CreateChialispSExp;
@@ -102,12 +101,9 @@ impl sexp::CreateSExp<Rc<SExp>> for CreateChialispSExp {
         Rc::new(SExp::Cons(loc, a, b))
     }
 
-    fn parse_sexp<I>(
-        start: Srcloc,
-        input: I
-    ) -> Result<Vec<Rc<SExp>>, (Srcloc, String)>
+    fn parse_sexp<I>(start: Srcloc, input: I) -> Result<Vec<Rc<SExp>>, (Srcloc, String)>
     where
-        I: Iterator<Item = u8>
+        I: Iterator<Item = u8>,
     {
         parse_sexp(start, input)
     }

@@ -1814,7 +1814,13 @@ impl<T: SExp + HasSrcloc> Program<T> {
         label
     }
 
-    fn load_atom<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], v: &[u8]) {
+    fn load_atom<C: CreateSExp<T>>(
+        &mut self,
+        source_sexp: T,
+        loc: &T::Srcloc,
+        hash: &[u8],
+        v: &[u8],
+    ) {
         let label = self.add_atom(hash, v);
         self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
@@ -1832,7 +1838,8 @@ impl<T: SExp + HasSrcloc> Program<T> {
             .filter(|label| !self.label_is_taken(label))
             .unwrap_or(generated_body_label);
 
-        self.code_to_hash.insert(sexp.to_string(), body_label.clone());
+        self.code_to_hash
+            .insert(sexp.to_string(), body_label.clone());
         self.labels_by_hash.insert(hash, body_label.clone());
         self.waiting_programs
             .push((body_label.clone(), sexp.clone()));
@@ -2216,12 +2223,12 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
 
         for r in relocations.iter() {
-            let resolved_target =
-                if let Some(code_to_hash) = self.code_to_hash.get(&r.reloc_target) {
-                    code_to_hash.clone()
-                } else {
-                    r.reloc_target.clone()
-                };
+            let resolved_target = if let Some(code_to_hash) = self.code_to_hash.get(&r.reloc_target)
+            {
+                code_to_hash.clone()
+            } else {
+                r.reloc_target.clone()
+            };
 
             obj.link(Link {
                 from: &r.function,

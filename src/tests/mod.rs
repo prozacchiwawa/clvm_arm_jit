@@ -2,17 +2,17 @@ use std::collections::HashMap;
 use std::fs;
 use std::rc::Rc;
 
-use clvmr::Allocator;
 use chialisp::classic::clvm_tools::binutils::disassemble;
 use chialisp::classic::clvm_tools::stages::stage_0::{DefaultProgramRunner, TRunProgram};
 use chialisp::compiler::clvm::convert_from_clvm_rs;
-use chialisp::compiler::comptypes::CompilerOpts;
 use chialisp::compiler::compiler::{DefaultCompilerOpts, compile_file};
+use chialisp::compiler::comptypes::CompilerOpts;
 use chialisp::compiler::debug::build_symbol_table_mut;
 use chialisp::compiler::dialect::AcceptedDialect;
 use chialisp::compiler::frontend::frontend;
 use chialisp::compiler::sexp::{SExp, decode_string, parse_sexp};
 use chialisp::compiler::srcloc::Srcloc;
+use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
 use crate::code::{Program, TARGET_ADDR};
@@ -67,9 +67,10 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         TARGET_ADDR,
         symbols.clone(),
     )
-        .expect("should be generatable");
+    .expect("should be generatable");
     let elf_data = generator.to_elf(&tmpname).expect("should generate");
-    let node_result = Emu::run_to_exit(&mut allocator, &elf_data.object_file, TARGET_ADDR, symbols)?;
+    let node_result =
+        Emu::run_to_exit(&mut allocator, &elf_data.object_file, TARGET_ADDR, symbols)?;
     Ok(node_result.map(|r| {
         convert_from_clvm_rs(&mut allocator, Srcloc::start("*emu*"), r).expect("converted")
     }))
@@ -79,9 +80,14 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
 fn test_run_to_exit_and_return_nil() {
     let mut allocator = Allocator::new();
     let elf = fs::read("resources/tests/return_nil.elf").expect("should exist");
-    let result = Emu::run_to_exit(&mut allocator, &elf, TARGET_ADDR, Rc::new(HashMap::default()))
-        .expect("should load")
-        .unwrap();
+    let result = Emu::run_to_exit(
+        &mut allocator,
+        &elf,
+        TARGET_ADDR,
+        Rc::new(HashMap::default()),
+    )
+    .expect("should load")
+    .unwrap();
     assert_eq!(disassemble(&allocator, result, None), "()");
 }
 
@@ -89,9 +95,14 @@ fn test_run_to_exit_and_return_nil() {
 fn test_run_to_exit_and_return_pair() {
     let mut allocator = Allocator::new();
     let elf = fs::read("resources/tests/return_cons.elf").expect("should exist");
-    let result = Emu::run_to_exit(&mut allocator, &elf, TARGET_ADDR, Rc::new(HashMap::default()))
-        .expect("should load")
-        .unwrap();
+    let result = Emu::run_to_exit(
+        &mut allocator,
+        &elf,
+        TARGET_ADDR,
+        Rc::new(HashMap::default()),
+    )
+    .expect("should load")
+    .unwrap();
     assert_eq!(disassemble(&allocator, result, None), "(26729 . \"there\")");
 }
 

@@ -67,10 +67,7 @@ pub trait CreateSExp<S: SExp + HasSrcloc> {
     fn atom(loc: S::Srcloc, bytes: &[u8]) -> S;
     fn cons(loc: S::Srcloc, a: S, b: S) -> S;
 
-    fn parse_sexp<I>(
-        start: S::Srcloc,
-        input: I,
-    ) -> Result<Vec<S>, (S::Srcloc, String)>
+    fn parse_sexp<I>(start: S::Srcloc, input: I) -> Result<Vec<S>, (S::Srcloc, String)>
     where
         I: Iterator<Item = u8>;
 }

@@ -877,7 +877,6 @@ impl Emu {
     }
 
     /// Run to completion and return a value by address for tests.
-    #[cfg(test)]
     pub fn run_to_exit(
         allocator: &mut Allocator,
         program: &[u8],

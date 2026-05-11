@@ -15,11 +15,10 @@ use chialisp::compiler::srcloc::Srcloc;
 use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
-use crate::code::{Program, TARGET_ADDR};
-use crate::emu::{DynResult, Emu};
+use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
+use clvm_to_arm_generate::emu::{DynResult, Emu};
 
-pub mod sexp_trait;
-use crate::tests::sexp_trait::CreateChialispSExp;
+use crate::sexp_trait::{CreateChialispSExp, SrclocWrap, RcSExp};
 
 #[cfg(test)]
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
@@ -41,14 +40,14 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         .set_frontend_opt(false);
 
     let parsed_program = parse_sexp(srcloc.clone(), program.bytes())
-        .map_err(|e| format!("failed to parse chialisp program {filename}"))?;
+        .map_err(|_e| format!("failed to parse chialisp program {filename}"))?;
     let fe = frontend(opts.clone(), &parsed_program)
-        .map_err(|e| format!("failed to compose frontend program"))?;
-    let range_results: HashMap<String, Srcloc> = fe
+        .map_err(|_e| format!("failed to compose frontend program"))?;
+    let range_results: HashMap<String, SrclocWrap> = fe
         .compileform()
         .helpers
         .iter()
-        .map(|h| (decode_string(h.name()), h.loc()))
+        .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
         .collect();
 
     let compiled = compile_file(&mut allocator, runner, opts, program, &mut symbol_table)
@@ -62,8 +61,8 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         range_results,
         filename,
         &tmpname,
-        Rc::new(compiled),
-        env_parsed[0].clone(),
+        RcSExp(Rc::new(compiled)),
+        RcSExp(env_parsed[0].clone()),
         TARGET_ADDR,
         symbols.clone(),
     )
@@ -79,7 +78,7 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
 #[test]
 fn test_run_to_exit_and_return_nil() {
     let mut allocator = Allocator::new();
-    let elf = fs::read("resources/tests/return_nil.elf").expect("should exist");
+    let elf = fs::read("../resources/tests/return_nil.elf").expect("should exist");
     let result = Emu::run_to_exit(
         &mut allocator,
         &elf,
@@ -94,7 +93,7 @@ fn test_run_to_exit_and_return_nil() {
 #[test]
 fn test_run_to_exit_and_return_pair() {
     let mut allocator = Allocator::new();
-    let elf = fs::read("resources/tests/return_cons.elf").expect("should exist");
+    let elf = fs::read("../resources/tests/return_cons.elf").expect("should exist");
     let result = Emu::run_to_exit(
         &mut allocator,
         &elf,

@@ -6,16 +6,25 @@ use chialisp::compiler::sexp::{SExp, parse_sexp};
 use chialisp::compiler::srcloc::Srcloc;
 use chialisp::util::Number;
 
-use crate::sexp;
-use crate::sexp::{SExpValue, Until, bi_zero};
+use clvm_to_arm_generate::sexp;
+use clvm_to_arm_generate::sexp::{SExpValue, Until, bi_zero};
 
-impl sexp::SExp for Rc<SExp> {
+#[derive(Clone)]
+pub struct RcSExp(pub Rc<SExp>);
+
+impl std::fmt::Display for RcSExp {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        self.0.fmt(fmt)
+    }
+}
+
+impl sexp::SExp for RcSExp {
     fn sha256tree(&self) -> Vec<u8> {
-        sha256tree(self.clone())
+        sha256tree(self.0.clone())
     }
 
     fn to_number(&self) -> Option<Number> {
-        self.as_ref().get_number().ok()
+        self.0.as_ref().get_number().ok()
     }
 
     fn proper_list(&self) -> Option<Vec<Self>> {
@@ -38,9 +47,9 @@ impl sexp::SExp for Rc<SExp> {
     }
 
     fn explode(&self) -> SExpValue<Self> {
-        match self.as_ref() {
+        match self.0.as_ref() {
             SExp::Nil(_loc) => SExpValue::Nil,
-            SExp::Cons(_loc, left, right) => SExpValue::Cons(left.clone(), right.clone()),
+            SExp::Cons(_loc, left, right) => SExpValue::Cons(RcSExp(left.clone()), RcSExp(right.clone())),
             SExp::Integer(_loc, i) => {
                 if *i == bi_zero() {
                     return SExpValue::Nil;
@@ -54,24 +63,33 @@ impl sexp::SExp for Rc<SExp> {
     }
 }
 
-impl sexp::Srcloc for Srcloc {
+#[derive(Clone)]
+pub struct SrclocWrap(pub Srcloc);
+
+impl std::fmt::Display for SrclocWrap {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        self.0.fmt(fmt)
+    }
+}
+
+impl sexp::Srcloc for SrclocWrap {
     fn start(filename: &str) -> Self {
-        Srcloc::start(filename)
+        SrclocWrap(Srcloc::start(filename))
     }
     fn filename(&self) -> String {
-        self.file.to_string()
+        self.0.file.to_string()
     }
     fn line(&self) -> usize {
-        self.line
+        self.0.line
     }
     fn col(&self) -> usize {
-        self.col
+        self.0.col
     }
     fn overlap(&self, other: &Self) -> bool {
-        self.overlap(other)
+        self.0.overlap(&other.0)
     }
     fn until(&self) -> Option<Until> {
-        if let Some(u) = &self.until {
+        if let Some(u) = &self.0.until {
             return Some(Until {
                 line: u.line as u32,
                 col: u.col as u32,
@@ -82,29 +100,29 @@ impl sexp::Srcloc for Srcloc {
     }
 }
 
-impl sexp::HasSrcloc for Rc<SExp> {
-    type Srcloc = Srcloc;
+impl sexp::HasSrcloc for RcSExp {
+    type Srcloc = SrclocWrap;
 
-    fn loc(&self) -> Srcloc {
-        self.as_ref().loc()
+    fn loc(&self) -> SrclocWrap {
+        SrclocWrap(self.0.as_ref().loc())
     }
 }
 
 pub struct CreateChialispSExp;
 
-impl sexp::CreateSExp<Rc<SExp>> for CreateChialispSExp {
-    fn atom(loc: Srcloc, bytes: &[u8]) -> Rc<SExp> {
-        Rc::new(SExp::Atom(loc, bytes.to_vec()))
+impl sexp::CreateSExp<RcSExp> for CreateChialispSExp {
+    fn atom(loc: SrclocWrap, bytes: &[u8]) -> RcSExp {
+        RcSExp(Rc::new(SExp::Atom(loc.0, bytes.to_vec())))
     }
 
-    fn cons(loc: Srcloc, a: Rc<SExp>, b: Rc<SExp>) -> Rc<SExp> {
-        Rc::new(SExp::Cons(loc, a, b))
+    fn cons(loc: SrclocWrap, a: RcSExp, b: RcSExp) -> RcSExp {
+        RcSExp(Rc::new(SExp::Cons(loc.0, a.0, b.0)))
     }
 
-    fn parse_sexp<I>(start: Srcloc, input: I) -> Result<Vec<Rc<SExp>>, (Srcloc, String)>
+    fn parse_sexp<I>(start: SrclocWrap, input: I) -> Result<Vec<RcSExp>, (SrclocWrap, String)>
     where
         I: Iterator<Item = u8>,
     {
-        parse_sexp(start, input)
+        parse_sexp(start.0, input).map(|v| v.into_iter().map(RcSExp).collect()).map_err(|(s, e)| (SrclocWrap(s), e))
     }
 }

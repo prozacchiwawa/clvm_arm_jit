@@ -22,16 +22,16 @@ use gdbstub::target::ext::breakpoints::{
 };
 use gdbstub::target::{Target, TargetResult};
 
-use crate::clvmr_node::{get_number, proper_list, sha256tree};
-use crate::disassemble::disassemble;
-use crate::sexp::{Number, bi_one, bi_zero, u8_from_number};
+use clvm_to_arm_generate::clvmr_node::{get_number, proper_list, sha256tree};
+use clvm_to_arm_generate::disassemble::disassemble;
+use clvm_to_arm_generate::sexp::{Number, bi_one, bi_zero, u8_from_number};
 
-use crate::code::{
+use clvm_to_arm_generate::code::{
     Encodable, Instr, NEXT_ALLOC_OFFSET, Register, SWI_DISPATCH_INSTRUCTION, SWI_DISPATCH_NEW_CODE,
     SWI_DONE, SWI_PRINT_EXPR, SWI_THROW,
 };
-use crate::loader::{ElfLoader, EmuSymbolInfo};
-use crate::mem::{PagedMemory, TargetMemory};
+use clvm_to_arm_generate::loader::{ElfLoader, EmuSymbolInfo};
+use clvm_to_arm_generate::mem::{PagedMemory, TargetMemory};
 
 pub type DynResult<T> = Result<T, Box<dyn std::error::Error>>;
 

@@ -263,9 +263,27 @@ name = "clvm_to_arm_chialisp"
 version = "0.1.0"
 dependencies = [
  "chialisp",
+ "clvm_to_arm_emulate",
  "clvm_to_arm_generate",
  "clvmr",
  "tempfile",
+]
+
+[[package]]
+name = "clvm_to_arm_emulate"
+version = "0.1.0"
+dependencies = [
+ "armv4t_emu",
+ "clvm_to_arm_generate",
+ "clvmr",
+ "elf_rs",
+ "gdbstub",
+ "gdbstub_arch",
+ "gimli",
+ "hex",
+ "num-bigint",
+ "sha2",
+ "target-lexicon 0.11.2",
 ]
 
 [[package]]
@@ -276,8 +294,6 @@ dependencies = [
  "clvmr",
  "elf_rs",
  "faerie",
- "gdbstub",
- "gdbstub_arch",
  "gimli",
  "hex",
  "num-bigint",

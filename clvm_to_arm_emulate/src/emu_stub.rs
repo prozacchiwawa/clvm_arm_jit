@@ -248,7 +248,7 @@ impl CallbackGdbStub {
         symbols: Rc<std::collections::HashMap<String, String>>,
         output: Box<dyn FnMut(&[u8]) -> Result<(), io::Error>>,
     ) -> Result<Self, String> {
-        let mut emu = Emu::new(elf_bin, crate::code::TARGET_ADDR, symbols)
+        let mut emu = Emu::new(elf_bin, clvm_to_arm_generate::code::TARGET_ADDR, symbols)
             .map_err(|e| format!("could not create emulator: {e:?}"))?;
         let connection = CallbackConnection::new(output);
         let gdb = GdbStub::new(connection);

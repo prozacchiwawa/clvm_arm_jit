@@ -16,7 +16,7 @@ use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
 use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
-use clvm_to_arm_generate::emu::{DynResult, Emu};
+use clvm_to_arm_emulate::emu::{DynResult, Emu};
 
 use crate::sexp_trait::{CreateChialispSExp, SrclocWrap, RcSExp};
 

@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["clvm_to_arm_chialisp","clvm_to_arm_generate"]
+members = ["clvm_to_arm_chialisp", "clvm_to_arm_emulate","clvm_to_arm_generate","clvm_to_arm_emulate"]

@@ -1,8 +1,6 @@
 pub mod clvmr_node;
 pub mod code;
 pub mod disassemble;
-pub mod emu;
-pub mod emu_stub;
 pub mod ir;
 pub mod loader;
 pub mod mem;

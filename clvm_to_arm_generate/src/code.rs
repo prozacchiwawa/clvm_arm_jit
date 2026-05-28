@@ -1934,6 +1934,10 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 Instr::Str(Register::R(6), Register::SP, 8),
                 Instr::Str(Register::R(7), Register::SP, 12),
                 Instr::Addi(Register::R(7), Register::R(0), 0),
+                // Insert a nop we can land on before translating any interior expression.
+                // This will allow any function or alias to contain an insruction apart from
+                // other code generation for the purpose of breakpoints.
+                Instr::Addi(Register::R(0), Register::R(0), 0),
             ] {
                 self.push::<C>(sexp.clone(), &sexp.loc(), i.clone());
             }

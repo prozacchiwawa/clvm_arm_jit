@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::Rc;
 
-use crate::sexp::Number;
+use crate::sexp::{CreateSExp, HasSrcloc, Number};
 
 use crate::disassemble::disassemble;
 use crate::sexp::bi_zero;
@@ -23,7 +23,6 @@ impl ClvmrAllocator {
         f(&ref_imu)
     }
 
-    #[cfg(test)]
     pub fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Allocator) -> R,
@@ -43,8 +42,8 @@ impl Default for ClvmrAllocator {
 
 #[derive(Clone)]
 pub struct ClvmrWrapper {
-    a: ClvmrAllocator,
-    n: NodePtr,
+    pub a: ClvmrAllocator,
+    pub n: NodePtr,
 }
 
 impl ClvmrWrapper {

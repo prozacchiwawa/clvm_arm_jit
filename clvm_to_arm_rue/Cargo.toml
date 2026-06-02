@@ -1,0 +1,19 @@
+[package]
+name = "clvm_to_arm_rue"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chialisp = "0.4.4"
+clvm_to_arm_generate = { path = "../clvm_to_arm_generate" }
+clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate" }
+clvmr = "0.16.4"
+id-arena = "2.3.0"
+indexmap = "2.14.0"
+rue-compiler = "0.8.4"
+rue-hir = "0.8.4"
+rue-diagnostic = "0.8.4"
+rue-lir = "0.8.4"
+rue-options = "0.8.4"
+hex = "0.4.3"
+rowan = "0.16.1"

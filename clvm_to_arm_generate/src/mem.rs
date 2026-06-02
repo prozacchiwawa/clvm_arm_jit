@@ -1,7 +1,7 @@
 use armv4t_emu::Memory;
 use std::collections::HashMap;
 
-pub const NEG: i32 = (-1 * 0x7fffffff) - 1;
+pub const NEG: i32 = (-0x7fffffff) - 1;
 
 pub trait TargetMemory {
     fn write_data(&mut self, content: &[u8], target_addr: u32);
@@ -75,14 +75,14 @@ impl PagedMemory {
         if self.pages.contains_key(&target) {
             // Ensure the top level doesn't suffer lifetime polution.
             if let Some(s) = self.pages.get_mut(&target) {
-                return (selection, Some(s));
+                (selection, Some(s))
             } else {
                 todo!();
             }
         } else {
             if create {
                 self.pages.insert(target, self.zeroed.clone());
-                return self.get_mut_slice(addr, create);
+                self.get_mut_slice(addr, create)
             } else {
                 (selection, None)
             }
@@ -182,7 +182,7 @@ impl TargetMemory for PagedMemory {
         let uread = self.read_u32(target_addr);
         let cvt1 = (uread & 0x7fffffff) as i32;
         if (uread & 0x80000000) != 0 {
-            (NEG + cvt1) as i32
+            NEG + cvt1
         } else {
             uread as i32
         }

@@ -15,10 +15,10 @@ use chialisp::compiler::srcloc::Srcloc;
 use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
-use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
+use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
 
-use crate::sexp_trait::{CreateChialispSExp, SrclocWrap, RcSExp};
+use crate::sexp_trait::{CreateChialispSExp, RcSExp, SrclocWrap};
 
 #[cfg(test)]
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {

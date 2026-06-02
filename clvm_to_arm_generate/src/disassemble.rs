@@ -33,7 +33,7 @@ fn has_oversized_sign_extension(data: &[u8]) -> bool {
 }
 
 pub fn ir_for_atom(atom: &[u8]) -> IRRepr {
-    if atom.len() == 0 {
+    if atom.is_empty() {
         return IRRepr::Null;
     }
     if atom.len() > 2 {
@@ -45,7 +45,7 @@ pub fn ir_for_atom(atom: &[u8]) -> IRRepr {
     } else {
         // Determine whether the bytes identity an integer in canonical form.
         // It's not canonical if there is oversized sign extension.
-        if atom != &[0] && !has_oversized_sign_extension(atom) {
+        if atom != [0] && !has_oversized_sign_extension(atom) {
             return IRRepr::Int(atom.to_vec(), true);
         }
     }

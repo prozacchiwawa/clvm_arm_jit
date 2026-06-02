@@ -98,7 +98,7 @@ pub fn get_u32(v: &[u8], n: usize) -> u32 {
 }
 
 pub fn bigint_from_bytes(b: &[u8], option: Option<TConvertOption>) -> Number {
-    if b.len() == 0 {
+    if b.is_empty() {
         return bi_zero();
     }
 
@@ -113,7 +113,7 @@ pub fn bigint_from_bytes(b: &[u8], option: Option<TConvertOption>) -> Number {
     if bytes4_length > 0 {
         for i_reverse in 0..bytes4_length {
             let i = bytes4_length - i_reverse - 1;
-            let byte32 = get_u32(&b, i * 4 + bytes4_remain);
+            let byte32 = get_u32(b, i * 4 + bytes4_remain);
             unsigned += byte32.to_bigint().unwrap() * order.clone();
             order <<= 32;
         }
@@ -169,13 +169,13 @@ impl Iterator for IROutputIterator {
                         return Some(bigint_from_bytes(i, Some(opts)).to_string());
                     }
                     IRRepr::Hex(h) => {
-                        return Some(format!("0x{}", hex::encode(&h)));
+                        return Some(format!("0x{}", hex::encode(h)));
                     }
                     IRRepr::Octal(o) => {
-                        return Some(format!("0x{}", hex::encode(&o)));
+                        return Some(format!("0x{}", hex::encode(o)));
                     }
                     IRRepr::Binary(b) => {
-                        return Some(format!("0x{}", hex::encode(&b)));
+                        return Some(format!("0x{}", hex::encode(b)));
                     }
                     IRRepr::Symbol(s) => {
                         return Some(s.to_string());

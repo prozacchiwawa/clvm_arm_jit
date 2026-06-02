@@ -49,7 +49,9 @@ impl sexp::SExp for RcSExp {
     fn explode(&self) -> SExpValue<Self> {
         match self.0.as_ref() {
             SExp::Nil(_loc) => SExpValue::Nil,
-            SExp::Cons(_loc, left, right) => SExpValue::Cons(RcSExp(left.clone()), RcSExp(right.clone())),
+            SExp::Cons(_loc, left, right) => {
+                SExpValue::Cons(RcSExp(left.clone()), RcSExp(right.clone()))
+            }
             SExp::Integer(_loc, i) => {
                 if *i == bi_zero() {
                     return SExpValue::Nil;
@@ -122,11 +124,17 @@ impl sexp::CreateSExp for CreateChialispSExp {
         RcSExp(Rc::new(SExp::Cons(loc.0, a.0, b.0)))
     }
 
-    fn parse_sexp<I>(&mut self, start: SrclocWrap, input: I) -> Result<Vec<RcSExp>, (SrclocWrap, String)>
+    fn parse_sexp<I>(
+        &mut self,
+        start: SrclocWrap,
+        input: I,
+    ) -> Result<Vec<RcSExp>, (SrclocWrap, String)>
     where
         I: Iterator<Item = u8>,
     {
-        parse_sexp(start.0, input).map(|v| v.into_iter().map(RcSExp).collect()).map_err(|(s, e)| (SrclocWrap(s), e))
+        parse_sexp(start.0, input)
+            .map(|v| v.into_iter().map(RcSExp).collect())
+            .map_err(|(s, e)| (SrclocWrap(s), e))
     }
 
     fn start_srcloc(&mut self, file: &str) -> Self::SL {

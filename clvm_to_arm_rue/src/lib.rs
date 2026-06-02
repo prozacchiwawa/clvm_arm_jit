@@ -1,29 +1,29 @@
+pub mod rue_lowerer;
+
 use std::collections::HashMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use clvmr::Allocator;
+
 use id_arena::Arena;
 use indexmap::{IndexMap, IndexSet};
-use rue_compiler::{normalize_path, Compiler, FileTree, SyntaxItemKind};
+use rue_compiler::{Compiler, FileTree, normalize_path};
 use rue_diagnostic::{DiagnosticSeverity, Source, SourceKind, SrcLoc};
 use rue_hir::{
     BinaryOp, BindingSymbol, ConstantSymbol, Database, DependencyGraph, Environment, ExprStatement,
     FunctionCall, FunctionKind, FunctionSymbol, Hir, HirId, IfStatement, PathError, Statement,
     Symbol, SymbolId, UnaryOp,
 };
-use rue_lir::{bigint_atom, ClvmOp, Lir, LirId};
+use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
-use clvm_to_arm_generate::sexp::{SExp, SExpValue, HasSrcloc, Srcloc, Until, CreateSExp};
+use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
+use clvm_to_arm_emulate::emu::Emu;
 
 use chialisp::classic::clvm_tools::binutils::assemble;
-use chialisp::compiler::clvm::convert_from_clvm_rs;
-use chialisp::compiler::sexp::decode_string;
-use chialisp::compiler::sexp;
 use chialisp::util::Number;
 
 struct Args {
@@ -148,6 +148,7 @@ struct DebugLowerer<'d, 'a, 'g> {
 }
 
 impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         db: &'d mut Database,
         arena: &'a mut Arena<Lir>,
@@ -174,7 +175,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
             base_path,
             symbol_locs,
             current_loc: fallback_loc,
-            src_repository: SrcRepository { },
+            src_repository: SrcRepository {},
         }
     }
 
@@ -1082,16 +1083,18 @@ fn quote(loc: RueSrcLoc, value: RueSExp) -> RueSExp {
 }
 
 fn codegen_debug(arena: &Arena<Lir>, locs: &HashMap<LirId, RueSrcLoc>, lir: LirId) -> RueSExp {
-    let loc = locs
-        .get(&lir)
-        .cloned()
-        .unwrap_or_else(|| RueSrcLoc::new(SrcLoc::new(Source::new("*rue*".into(), SourceKind::Std("*rue*".to_string())), std::ops::Range { start: 0, end: 0 }) ));
+    let loc = locs.get(&lir).cloned().unwrap_or_else(|| {
+        RueSrcLoc::new(SrcLoc::new(
+            Source::new("*rue*".into(), SourceKind::Std("*rue*".to_string())),
+            std::ops::Range { start: 0, end: 0 },
+        ))
+    });
     match &arena[lir] {
         Lir::Atom(bytes) => {
             if bytes.is_empty() {
                 nil(loc)
             } else {
-                quote(loc.clone(), atom(loc, &bytes))
+                quote(loc.clone(), atom(loc, bytes))
             }
         }
         Lir::Quote(arg) => {
@@ -1362,7 +1365,7 @@ fn codegen_debug(arena: &Arena<Lir>, locs: &HashMap<LirId, RueSrcLoc>, lir: LirI
             loc.clone(),
             ClvmOp::DebugPrint,
             vec![
-                quote(loc.clone(), atom(loc.clone(), &srcloc.as_bytes().to_vec())),
+                quote(loc.clone(), atom(loc.clone(), srcloc.as_bytes())),
                 codegen_debug(arena, locs, *value),
             ],
         ),
@@ -1403,8 +1406,7 @@ fn op_list_args(
     )
 }
 
-struct SrcRepository {
-}
+struct SrcRepository {}
 
 fn rue_srcloc_to_chialisp(file_repo: &mut SrcRepository, loc: &SrcLoc) -> RueSrcLoc {
     let start = loc.start();
@@ -1445,7 +1447,11 @@ fn syntax_item_loc(
     // Some(loc)
 }
 
-fn build_symbol_locs(ctx: &Compiler, src_repository: &mut SrcRepository, tree: &FileTree) -> HashMap<SymbolId, RueSrcLoc> {
+fn build_symbol_locs(
+    ctx: &Compiler,
+    src_repository: &mut SrcRepository,
+    tree: &FileTree,
+) -> HashMap<SymbolId, RueSrcLoc> {
     todo!();
     // let sources: HashMap<SourceKind, Source> = tree
     //     .all_files()
@@ -1512,26 +1518,37 @@ fn add_function_symbol_metadata(
     symbol_table.insert(key, "0".to_string());
 }
 
+struct RueCompileOutput {
+    program: RueSExp,
+    symbols: HashMap<String, String>,
+    srclocs: HashMap<String, RueSrcLoc>,
+}
+
 fn compile_main(
     ctx: &mut Compiler,
     tree: &FileTree,
     main: SymbolId,
     base_path: PathBuf,
     symbol_locs: &HashMap<SymbolId, RueSrcLoc>,
-) -> Result<(RueSExp, HashMap<String, String>, HashMap<String, RueSrcLoc>), String> {
+) -> Result<RueCompileOutput, String> {
     let options = *ctx.options();
     let graph = DependencyGraph::build(ctx, main, options);
     let mut arena = Arena::new();
     let mut lir_locs = HashMap::new();
     let mut function_body_lirs = HashMap::new();
     let mut function_argument_trees = HashMap::new();
-    let mut src_repository = SrcRepository { };
+    let mut src_repository = SrcRepository {};
     let source = "".to_string(); // XXX
     let fallback_loc = tree
         .all_files()
         .first()
         .map(|file| source_to_start_loc(&mut src_repository, &file.source))
-        .unwrap_or_else(|| RueSrcLoc::new(SrcLoc::new(Source::new(source.into(), SourceKind::Std("*rue*".to_string())), std::ops::Range { start: 0, end : 0 })));
+        .unwrap_or_else(|| {
+            RueSrcLoc::new(SrcLoc::new(
+                Source::new(source.into(), SourceKind::Std("*rue*".to_string())),
+                std::ops::Range { start: 0, end: 0 },
+            ))
+        });
     let lir = {
         let mut lowerer = DebugLowerer::new(
             ctx,
@@ -1579,11 +1596,14 @@ fn compile_main(
         add_function_symbol_metadata(&mut symbol_table, function_hash, &name, &arguments);
     }
 
-    Ok((compiled, symbol_table, program_locations))
+    Ok(RueCompileOutput {
+        program: compiled,
+        symbols: symbol_table,
+        srclocs: program_locations,
+    })
 }
 
-struct CreateRueSExp {
-}
+struct CreateRueSExp {}
 
 impl CreateSExp for CreateRueSExp {
     type S = RueSExp;
@@ -1602,15 +1622,24 @@ impl CreateSExp for CreateRueSExp {
         todo!();
     }
 
-    fn parse_sexp<I>(&mut self, start: Self::SL, input: I) -> Result<Vec<Self::S>, (Self::SL, String)>
+    fn parse_sexp<I>(
+        &mut self,
+        start: Self::SL,
+        input: I,
+    ) -> Result<Vec<Self::S>, (Self::SL, String)>
     where
-        I: Iterator<Item = u8>
+        I: Iterator<Item = u8>,
     {
         todo!();
     }
 }
 
-pub fn compile_rue_to_arm_elf(args: &Args) -> Result<ElfObject, String> {
+struct RueGenerateOutput {
+    object: ElfObject,
+    symbols: Rc<HashMap<String, String>>,
+}
+
+pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> {
     let mut allocator = ClvmrAllocator::default();
     let search_path = Path::new(&args.filename)
         .canonicalize()
@@ -1629,7 +1658,7 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<ElfObject, String> {
         }
     });
 
-    let mut src_repository = SrcRepository { };
+    let mut src_repository = SrcRepository {};
     let mut ctx = Compiler::new(project.options);
     let tree = FileTree::compile_path(&mut ctx, &project.entrypoint, &mut HashMap::new())
         .map_err(|e| format!("failed to compile rue: {e:?}"))?;
@@ -1671,25 +1700,29 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<ElfObject, String> {
         .symbol("main")
         .ok_or_else(|| "no `main` function found in rue file".to_string())?;
     let symbol_locs = build_symbol_locs(&ctx, &mut src_repository, &tree);
-    let (compiled, symbol_table, program_locations) =
-        compile_main(&mut ctx, &tree, main, base_path, &symbol_locs)?;
+    let output = compile_main(&mut ctx, &tree, main, base_path, &symbol_locs)?;
 
-    let env =
-        allocator.with_allocator_mut(|a| {
-            assemble(a, &args.env).map_err(|e| format!("failed to read env: {e:?}"))
-        })?;
-    let env_loc = RueSrcLoc(Rc::new(SrcLoc::new(Source::new("".to_string().into(), SourceKind::Std("*env*".to_string())), std::ops::Range { start: 0, end: 0 })));
-    let symbols = Rc::new(symbol_table.clone());
+    let env = allocator.with_allocator_mut(|a| {
+        assemble(a, &args.env).map_err(|e| format!("failed to read env: {e:?}"))
+    })?;
+    let env_loc = RueSrcLoc(Rc::new(SrcLoc::new(
+        Source::new("".to_string().into(), SourceKind::Std("*env*".to_string())),
+        std::ops::Range { start: 0, end: 0 },
+    )));
+    let symbols = Rc::new(output.symbols.clone());
 
-    let mut creator = CreateRueSExp { };
+    let mut creator = CreateRueSExp {};
     let program = Program::new(
         &mut creator,
-        program_locations,
+        output.srclocs,
         &args.filename,
         &args.output,
-        compiled,
+        output.program,
         RueSExp {
-            clvm: ClvmrWrapper { a: allocator.clone(), n: env },
+            clvm: ClvmrWrapper {
+                a: allocator.clone(),
+                n: env,
+            },
             loc: env_loc,
         },
         TARGET_ADDR,
@@ -1698,5 +1731,28 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<ElfObject, String> {
 
     program
         .to_elf(&args.output)
+        .map(|p| RueGenerateOutput {
+            object: p,
+            symbols: symbols
+        })
         .map_err(|e| format!("failed to create elf output: {e:?}"))
 }
+
+/*
+#[test]
+fn test_rue_compile_and_run_as_arm() {
+    let compiled = compile_rue_to_arm_elf(&Args {
+        env: "(3)".to_string(),
+        filename: "../resources/tests/factorial.rue".to_string(),
+        output: "factorial.rue.elf".to_string(),
+    }).unwrap();
+    let mut allocator = Allocator::new();
+    let result = Emu::run_to_exit(
+        &mut allocator,
+        &compiled.object.object_file,
+        TARGET_ADDR,
+        compiled.symbols,
+    ).unwrap();
+    todo!();
+}
+*/

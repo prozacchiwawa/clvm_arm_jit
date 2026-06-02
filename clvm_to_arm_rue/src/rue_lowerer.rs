@@ -1,5 +1,3 @@
-#![allow(clippy::needless_pass_by_value)]
-
 use std::{collections::HashMap, path::PathBuf};
 
 use id_arena::Arena;

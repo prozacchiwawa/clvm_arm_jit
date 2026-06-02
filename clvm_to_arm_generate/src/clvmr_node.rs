@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::Rc;
 
-use crate::sexp::{CreateSExp, HasSrcloc, Number};
+use crate::sexp::Number;
 
 use crate::disassemble::disassemble;
 use crate::sexp::bi_zero;
@@ -19,7 +19,7 @@ impl ClvmrAllocator {
     where
         F: FnOnce(&Allocator) -> R,
     {
-        let ref_imu = (&*self.a).borrow();
+        let ref_imu = (*self.a).borrow();
         f(&ref_imu)
     }
 
@@ -27,7 +27,7 @@ impl ClvmrAllocator {
     where
         F: FnOnce(&mut Allocator) -> R,
     {
-        let mut ref_mut = (&*self.a).borrow_mut();
+        let mut ref_mut = (*self.a).borrow_mut();
         f(&mut ref_mut)
     }
 }

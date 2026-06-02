@@ -72,7 +72,11 @@ pub trait CreateSExp {
     fn start_srcloc(&mut self, name: &str) -> Self::SL;
     fn loc(&self, s: Self::S) -> Self::SL;
 
-    fn parse_sexp<I>(&mut self, start: Self::SL, input: I) -> Result<Vec<Self::S>, (Self::SL, String)>
+    fn parse_sexp<I>(
+        &mut self,
+        start: Self::SL,
+        input: I,
+    ) -> Result<Vec<Self::S>, (Self::SL, String)>
     where
         I: Iterator<Item = u8>;
 }

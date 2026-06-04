@@ -2,13 +2,14 @@ pub mod rue_lowerer;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::rc::Rc;
 
 use clvmr::Allocator;
 
 use id_arena::Arena;
 use indexmap::{IndexMap, IndexSet};
-use rue_compiler::{Compiler, FileTree, normalize_path};
+use rue_compiler::{Compiler, FileTree, SyntaxItemKind, normalize_path};
 use rue_diagnostic::{DiagnosticSeverity, Source, SourceKind, SrcLoc};
 use rue_hir::{
     BinaryOp, BindingSymbol, ConstantSymbol, Database, DependencyGraph, Environment, ExprStatement,
@@ -23,7 +24,10 @@ use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 use clvm_to_arm_emulate::emu::Emu;
 
-use chialisp::classic::clvm_tools::binutils::assemble;
+use chialisp::classic::clvm_tools::binutils::{assemble, disassemble};
+use chialisp::classic::clvm_tools::sha256tree::sha256tree;
+use chialisp::classic::clvm::sexp::proper_list;
+use chialisp::compiler::sexp::decode_string;
 use chialisp::util::Number;
 
 struct Args {
@@ -33,11 +37,15 @@ struct Args {
 }
 
 #[derive(Clone)]
-struct RueSrcLoc(Rc<SrcLoc>);
+struct RueSrcLoc {
+    raw: Rc<SrcLoc>,
+}
 
 impl RueSrcLoc {
     pub fn new(sl: SrcLoc) -> Self {
-        RueSrcLoc(sl.into())
+        RueSrcLoc {
+            raw: Rc::new(sl),
+        }
     }
 }
 
@@ -52,13 +60,57 @@ impl SExp for RueSExp {
         todo!();
     }
     fn proper_list(&self) -> Option<Vec<Self>> {
-        todo!();
+        let a_copy = self.clvm.a.clone();
+        self.clvm.a.with_allocator(|a| {
+            if let Some(pl) = proper_list(a, self.clvm.n, true) {
+                let mut result = Vec::new();
+                for elt in pl.into_iter() {
+                    result.push(RueSExp {
+                        clvm: ClvmrWrapper {
+                            a: a_copy.clone(),
+                            n: elt
+                        },
+                        loc: self.loc.clone()
+                    })
+                }
+                Some(result)
+            } else {
+                None
+            }
+        })
     }
     fn sha256tree(&self) -> Vec<u8> {
-        todo!();
+        self.clvm.a.with_allocator_mut(|a| {
+            sha256tree(a, self.clvm.n).data().to_vec()
+        })
     }
     fn explode(&self) -> SExpValue<Self> {
-        todo!();
+        let a_copy = self.clvm.a.clone();
+        self.clvm.a.with_allocator(|allocator| {
+            match allocator.sexp(self.clvm.n) {
+                clvmr::allocator::SExp::Pair(a,b) => SExpValue::Cons(RueSExp {
+                    clvm: ClvmrWrapper {
+                        a: a_copy.clone(),
+                        n: a,
+                    },
+                    loc: self.loc.clone()
+                }, RueSExp {
+                    clvm: ClvmrWrapper {
+                        a: a_copy,
+                        n: b
+                    },
+                    loc: self.loc.clone()
+                }),
+                clvmr::allocator::SExp::Atom => {
+                    let buf = allocator.atom(self.clvm.n);
+                    if buf.is_empty() {
+                        SExpValue::Nil
+                    } else {
+                        SExpValue::Atom(buf.to_vec())
+                    }
+                }
+            }
+        })
     }
 
     fn nilp(&self) -> bool {
@@ -78,34 +130,68 @@ impl HasSrcloc for RueSExp {
     type Srcloc = RueSrcLoc;
 
     fn loc(&self) -> Self::Srcloc {
-        todo!();
+        self.loc.clone()
     }
 }
 
 impl Srcloc for RueSrcLoc {
     fn start(filename: &str) -> Self {
-        todo!();
+        RueSrcLoc {
+            raw: Rc::new(SrcLoc::new(
+                Source::new("".to_string().into(), SourceKind::File(filename.to_string())),
+                std::ops::Range { start: 0, end: 0 }
+            ))
+        }
     }
     fn filename(&self) -> String {
-        todo!();
+        self.raw.source.kind.display(Path::new("."))
     }
     fn line(&self) -> usize {
-        todo!();
+        self.raw.start().line
     }
     fn col(&self) -> usize {
-        todo!();
+        self.raw.start().col
     }
     fn overlap(&self, other: &Self) -> bool {
         todo!();
     }
     fn until(&self) -> Option<Until> {
-        todo!();
+        if self.raw.span.end != self.raw.span.start {
+            let cl = self.raw.end();
+            return Some(Until {
+                line: cl.line as u32,
+                col: cl.col as u32
+            });
+        }
+
+        None
     }
 }
 
 impl std::fmt::Display for RueSrcLoc {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        todo!();
+        let lc = self.raw.start();
+        let end = self.raw.end();
+        if end.line != lc.line || end.col != lc.col {
+            write!
+                (formatter,
+                 "{}({}):{}-{}({}):{}",
+                 self.raw.source.kind.display(Path::new(".")),
+                 lc.line,
+                 lc.col,
+                 self.raw.source.kind.display(Path::new(".")),
+                 end.line,
+                 end.col
+                )
+        } else {
+            write!
+                (formatter,
+                 "{}({}):{}",
+                 self.raw.source.kind.display(Path::new(".")),
+                 lc.line,
+                 lc.col,
+                )
+        }
     }
 }
 
@@ -144,7 +230,6 @@ struct DebugLowerer<'d, 'a, 'g> {
     base_path: PathBuf,
     symbol_locs: &'a HashMap<SymbolId, RueSrcLoc>,
     current_loc: RueSrcLoc,
-    src_repository: SrcRepository,
 }
 
 impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
@@ -175,7 +260,6 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
             base_path,
             symbol_locs,
             current_loc: fallback_loc,
-            src_repository: SrcRepository {},
         }
     }
 
@@ -803,7 +887,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         body: Option<HirId>,
     ) -> LirId {
         stmts.remove(0);
-        let loc = rue_srcloc_to_chialisp(&mut self.src_repository, &srcloc);
+        let loc = rue_srcloc_to_chialisp(&srcloc);
         self.with_loc(loc, |lowerer| {
             let raise = if lowerer.options.debug_symbols {
                 let error = lowerer.alloc_here(Lir::Atom(
@@ -823,7 +907,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
     }
 
     fn lower_raise(&mut self, env: &Environment, hir: Option<HirId>, srcloc: SrcLoc) -> LirId {
-        let loc = rue_srcloc_to_chialisp(&mut self.src_repository, &srcloc);
+        let loc = rue_srcloc_to_chialisp(&srcloc);
         self.with_loc(loc, |lowerer| {
             if !lowerer.options.debug_symbols {
                 return lowerer.alloc_here(Lir::Raise(vec![]));
@@ -852,7 +936,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         body: Option<HirId>,
     ) -> LirId {
         stmts.remove(0);
-        let loc = rue_srcloc_to_chialisp(&mut self.src_repository, &srcloc);
+        let loc = rue_srcloc_to_chialisp(&srcloc);
         self.with_loc(loc, |lowerer| {
             let rest = lowerer.lower_block(env, stmts, body);
             let value = lowerer.lower_hir(env, value);
@@ -1055,324 +1139,431 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
     }
 }
 
-fn atom(loc: RueSrcLoc, vec: &[u8]) -> RueSExp {
-    todo!();
+fn list(creator: &mut CreateRueSExp, loc: RueSrcLoc, items: &[RueSExp]) -> RueSExp {
+    let mut term = creator.atom(loc.clone(), &[]);
+    for item in items.iter().rev() {
+        term = creator.cons(loc.clone(), item.clone(), term);
+    }
+    term
 }
 
-fn list(loc: RueSrcLoc, items: &[RueSExp]) -> RueSExp {
-    todo!();
-}
-
-fn cons(loc: RueSrcLoc, a: RueSExp, b: RueSExp) -> RueSExp {
-    todo!();
-}
-
-fn nil(loc: RueSrcLoc) -> RueSExp {
-    todo!();
-}
-
-fn op_list(loc: RueSrcLoc, op: ClvmOp, args: Vec<RueSExp>) -> RueSExp {
+fn op_list(creator: &mut CreateRueSExp, loc: RueSrcLoc, op: ClvmOp, args: Vec<RueSExp>) -> RueSExp {
     let mut items = Vec::with_capacity(args.len() + 1);
-    items.push(atom(loc.clone(), &op.to_atom()));
+    items.push(creator.atom(loc.clone(), &op.to_atom()));
     items.extend(args);
-    list(loc, &items)
+    list(creator, loc, &items)
 }
 
-fn quote(loc: RueSrcLoc, value: RueSExp) -> RueSExp {
-    cons(loc.clone(), atom(loc, &ClvmOp::Quote.to_atom()), value)
+fn quote(creator: &mut CreateRueSExp, loc: RueSrcLoc, value: RueSExp) -> RueSExp {
+    let left = creator.atom(loc.clone(), &ClvmOp::Quote.to_atom());
+    creator.cons(loc.clone(), left, value)
 }
 
-fn codegen_debug(arena: &Arena<Lir>, locs: &HashMap<LirId, RueSrcLoc>, lir: LirId) -> RueSExp {
+fn codegen_debug(creator: &mut CreateRueSExp, arena: &Arena<Lir>, locs: &HashMap<LirId, RueSrcLoc>, lir: LirId) -> RueSExp {
     let loc = locs.get(&lir).cloned().unwrap_or_else(|| {
         RueSrcLoc::new(SrcLoc::new(
-            Source::new("*rue*".into(), SourceKind::Std("*rue*".to_string())),
+            Source::new("*rue*".into(), SourceKind::File("*rue*".to_string())),
             std::ops::Range { start: 0, end: 0 },
         ))
     });
     match &arena[lir] {
         Lir::Atom(bytes) => {
             if bytes.is_empty() {
-                nil(loc)
+                creator.atom(loc, &[])
             } else {
-                quote(loc.clone(), atom(loc, bytes))
+                let quoted = creator.atom(loc.clone(), bytes);
+                quote(creator, loc, quoted)
             }
         }
         Lir::Quote(arg) => {
-            let arg = codegen_debug(arena, locs, *arg);
-            quote(loc, arg)
+            let arg = codegen_debug(creator, arena, locs, *arg);
+            quote(creator, loc, arg)
         }
         Lir::Path(path) => {
             let mut bytes = bigint_atom((*path).into());
             while !bytes.is_empty() && bytes[0] == 0 {
                 bytes = bytes[1..].to_vec();
             }
-            atom(loc, &bytes)
+            creator.atom(loc, &bytes)
         }
-        Lir::Run(callee, env) => op_list(
-            loc,
-            ClvmOp::Apply,
-            vec![
-                codegen_debug(arena, locs, *callee),
-                codegen_debug(arena, locs, *env),
-            ],
-        ),
+        Lir::Run(callee, env) => {
+            let list_vec = vec![
+                codegen_debug(creator, arena, locs, *callee),
+                codegen_debug(creator, arena, locs, *env),
+            ];
+
+            op_list(
+                creator,
+                loc,
+                ClvmOp::Apply,
+                list_vec,
+            )
+        },
         Lir::Closure(function, captures, has_parameters) => {
-            let function = codegen_debug(arena, locs, *function);
+            let function = codegen_debug(creator, arena, locs, *function);
             let mut args = if *has_parameters {
-                quote(loc.clone(), atom(loc.clone(), &[1]))
+                let quoted_atom = creator.atom(loc.clone(), &[1]);
+                quote(creator, loc.clone(), quoted_atom)
             } else {
-                nil(loc.clone())
+                creator.atom(loc.clone(), &[])
             };
 
             for capture in captures.iter().rev() {
-                let capture = codegen_debug(arena, locs, *capture);
-                args = op_list(
+                let capture = codegen_debug(creator, arena, locs, *capture);
+                let quoted_atom = creator.atom(loc.clone(), &ClvmOp::Cons.to_atom());
+                let quoted_head_atom = quote(creator, loc.clone(), quoted_atom);
+                let quoted_op_quote = creator.atom(loc.clone(), &ClvmOp::Quote.to_atom());
+                let quoted_head = quote(
+                    creator,
+                    loc.clone(),
+                    quoted_op_quote,
+                );
+                let inner_cons_quote = op_list(
+                    creator,
                     loc.clone(),
                     ClvmOp::Cons,
                     vec![
-                        quote(loc.clone(), atom(loc.clone(), &ClvmOp::Cons.to_atom())),
-                        op_list(
-                            loc.clone(),
-                            ClvmOp::Cons,
-                            vec![
-                                op_list(
-                                    loc.clone(),
-                                    ClvmOp::Cons,
-                                    vec![
-                                        quote(
-                                            loc.clone(),
-                                            atom(loc.clone(), &ClvmOp::Quote.to_atom()),
-                                        ),
-                                        capture,
-                                    ],
-                                ),
-                                op_list(loc.clone(), ClvmOp::Cons, vec![args, nil(loc.clone())]),
-                            ],
-                        ),
+                        quoted_head,
+                        capture,
+                    ],
+                );
+                let nil_tail = creator.atom(loc.clone(), &[]);
+                let inner_cons_tail = op_list(creator, loc.clone(), ClvmOp::Cons, vec![args, nil_tail]);
+                let list_tail = op_list(
+                    creator,
+                    loc.clone(),
+                    ClvmOp::Cons,
+                    vec![
+                        inner_cons_quote,
+                        inner_cons_tail,
+                    ],
+                );
+
+                args = op_list(
+                    creator,
+                    loc.clone(),
+                    ClvmOp::Cons,
+                    vec![
+                        quoted_head_atom,
+                        list_tail,
                     ],
                 );
             }
 
-            op_list(
+            let nil = creator.atom(loc.clone(), &ClvmOp::Apply.to_atom());
+            let quote_op = creator.atom(loc.clone(), &ClvmOp::Quote.to_atom());
+            let quoted_quote = quote(creator, loc.clone(), quote_op);
+            let cons_first = op_list(
+                creator,
                 loc.clone(),
                 ClvmOp::Cons,
                 vec![
-                    quote(loc.clone(), atom(loc.clone(), &ClvmOp::Apply.to_atom())),
-                    op_list(
-                        loc.clone(),
-                        ClvmOp::Cons,
-                        vec![
-                            op_list(
-                                loc.clone(),
-                                ClvmOp::Cons,
-                                vec![
-                                    quote(loc.clone(), atom(loc.clone(), &ClvmOp::Quote.to_atom())),
-                                    function,
-                                ],
-                            ),
-                            op_list(loc.clone(), ClvmOp::Cons, vec![args, nil(loc.clone())]),
-                        ],
-                    ),
+                    quoted_quote,
+                    function,
+                ],
+            );
+            let cons_rest = op_list(creator, loc.clone(), ClvmOp::Cons, vec![args, nil.clone()]);
+            let cons_arguments = op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::Cons,
+                vec![
+                    cons_first,
+                    cons_rest,
+                ],
+            );
+            let quoted_nil = quote(creator, loc.clone(), nil.clone());
+
+            op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::Cons,
+                vec![
+                    quoted_nil,
+                    cons_arguments,
                 ],
             )
         }
-        Lir::First(arg) => op_list(loc, ClvmOp::First, vec![codegen_debug(arena, locs, *arg)]),
-        Lir::Rest(arg) => op_list(loc, ClvmOp::Rest, vec![codegen_debug(arena, locs, *arg)]),
-        Lir::Cons(first, rest) => op_list(
-            loc,
-            ClvmOp::Cons,
-            vec![
-                codegen_debug(arena, locs, *first),
-                codegen_debug(arena, locs, *rest),
-            ],
-        ),
-        Lir::Listp(arg, _) => op_list(loc, ClvmOp::Listp, vec![codegen_debug(arena, locs, *arg)]),
-        Lir::Add(args) => op_list_args(arena, locs, loc, ClvmOp::Add, args),
-        Lir::Sub(args) => op_list_args(arena, locs, loc, ClvmOp::Sub, args),
-        Lir::Mul(args) => op_list_args(arena, locs, loc, ClvmOp::Mul, args),
-        Lir::Div(first, second) => op_list_binary(arena, locs, loc, ClvmOp::Div, *first, *second),
+        Lir::First(arg) => {
+            let first_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::First, vec![first_arg])
+        }
+        Lir::Rest(arg) => {
+            let rest_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::Rest, vec![rest_arg])
+        }
+        Lir::Cons(first, rest) => {
+            let cons_first = codegen_debug(creator, arena, locs, *first);
+            let cons_rest = codegen_debug(creator, arena, locs, *rest);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::Cons,
+                vec![
+                    cons_first,
+                    cons_rest,
+                ],
+            )
+        }
+        Lir::Listp(arg, _) => {
+            let listp_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::Listp, vec![listp_arg])
+        }
+        Lir::Add(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Add, args),
+        Lir::Sub(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Sub, args),
+        Lir::Mul(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Mul, args),
+        Lir::Div(first, second) => op_list_binary(creator, arena, locs, loc, ClvmOp::Div, *first, *second),
         Lir::Divmod(first, second) => {
-            op_list_binary(arena, locs, loc, ClvmOp::Divmod, *first, *second)
+            op_list_binary(creator, arena, locs, loc, ClvmOp::Divmod, *first, *second)
         }
-        Lir::Mod(first, second) => op_list_binary(arena, locs, loc, ClvmOp::Mod, *first, *second),
-        Lir::Modpow(a, b, c) => op_list(
-            loc,
-            ClvmOp::Modpow,
-            vec![
-                codegen_debug(arena, locs, *a),
-                codegen_debug(arena, locs, *b),
-                codegen_debug(arena, locs, *c),
-            ],
-        ),
-        Lir::Eq(first, second) => op_list_binary(arena, locs, loc, ClvmOp::Eq, *first, *second),
-        Lir::Gt(first, second) => op_list_binary(arena, locs, loc, ClvmOp::Gt, *first, *second),
+        Lir::Mod(first, second) => op_list_binary(creator, arena, locs, loc, ClvmOp::Mod, *first, *second),
+        Lir::Modpow(a, b, c) => {
+            let modpow_a = codegen_debug(creator, arena, locs, *a);
+            let modpow_b = codegen_debug(creator, arena, locs, *b);
+            let modpow_c = codegen_debug(creator, arena, locs, *c);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::Modpow,
+                vec![
+                    modpow_a,
+                    modpow_b,
+                    modpow_c,
+                ],
+            )
+        }
+        Lir::Eq(first, second) => op_list_binary(creator, arena, locs, loc, ClvmOp::Eq, *first, *second),
+        Lir::Gt(first, second) => op_list_binary(creator, arena, locs, loc, ClvmOp::Gt, *first, *second),
         Lir::GtBytes(first, second) => {
-            op_list_binary(arena, locs, loc, ClvmOp::GtBytes, *first, *second)
+            op_list_binary(creator, arena, locs, loc, ClvmOp::GtBytes, *first, *second)
         }
-        Lir::Not(arg) => op_list(loc, ClvmOp::Not, vec![codegen_debug(arena, locs, *arg)]),
-        Lir::All(args) => op_list_args(arena, locs, loc, ClvmOp::All, args),
-        Lir::Any(args) => op_list_args(arena, locs, loc, ClvmOp::Any, args),
+        Lir::Not(arg) => {
+            let not_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::Not, vec![not_arg])
+        }
+        Lir::All(args) => op_list_args(creator, arena, locs, loc, ClvmOp::All, args),
+        Lir::Any(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Any, args),
         Lir::If(cond, then_lir, else_lir, inline) => {
-            let cond = codegen_debug(arena, locs, *cond);
-            let then_ptr = codegen_debug(arena, locs, *then_lir);
-            let else_ptr = codegen_debug(arena, locs, *else_lir);
+            let cond = codegen_debug(creator, arena, locs, *cond);
+            let then_ptr = codegen_debug(creator, arena, locs, *then_lir);
+            let else_ptr = codegen_debug(creator, arena, locs, *else_lir);
             if *inline {
-                op_list(loc, ClvmOp::If, vec![cond, then_ptr, else_ptr])
+                op_list(creator, loc, ClvmOp::If, vec![cond, then_ptr, else_ptr])
             } else {
+                let then_quoted = quote(creator, loc.clone(), then_ptr);
+                let else_quoted = quote(creator, loc.clone(), else_ptr);
+                let apply_prog = op_list(
+                    creator,
+                    loc.clone(),
+                    ClvmOp::If,
+                    vec![
+                        cond,
+                        then_quoted,
+                        else_quoted,
+                    ],
+                );
+
+                let env_atom = creator.atom(loc.clone(), &[1]);
                 op_list(
+                    creator,
                     loc.clone(),
                     ClvmOp::Apply,
                     vec![
-                        op_list(
-                            loc.clone(),
-                            ClvmOp::If,
-                            vec![
-                                cond,
-                                quote(loc.clone(), then_ptr),
-                                quote(loc.clone(), else_ptr),
-                            ],
-                        ),
-                        atom(loc, &[1]),
+                        apply_prog,
+                        env_atom,
                     ],
                 )
             }
         }
-        Lir::Raise(args) => op_list_args(arena, locs, loc, ClvmOp::Raise, args),
-        Lir::Concat(args) => op_list_args(arena, locs, loc, ClvmOp::Concat, args),
-        Lir::Strlen(arg) => op_list(loc, ClvmOp::Strlen, vec![codegen_debug(arena, locs, *arg)]),
+        Lir::Raise(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Raise, args),
+        Lir::Concat(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Concat, args),
+        Lir::Strlen(arg) => {
+            let strlen_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::Strlen, vec![strlen_arg])
+        }
         Lir::Substr(arg, start, end) => {
             let mut args = vec![
-                codegen_debug(arena, locs, *arg),
-                codegen_debug(arena, locs, *start),
+                codegen_debug(creator, arena, locs, *arg),
+                codegen_debug(creator, arena, locs, *start),
             ];
             if let Some(end) = end {
-                args.push(codegen_debug(arena, locs, *end));
+                args.push(codegen_debug(creator, arena, locs, *end));
             }
-            op_list(loc, ClvmOp::Substr, args)
+            op_list(creator, loc, ClvmOp::Substr, args)
         }
-        Lir::Logand(args) => op_list_args(arena, locs, loc, ClvmOp::Logand, args),
-        Lir::Logior(args) => op_list_args(arena, locs, loc, ClvmOp::Logior, args),
-        Lir::Logxor(args) => op_list_args(arena, locs, loc, ClvmOp::Logxor, args),
-        Lir::Lognot(arg) => op_list(loc, ClvmOp::Lognot, vec![codegen_debug(arena, locs, *arg)]),
-        Lir::Ash(arg, shift) => op_list_binary(arena, locs, loc, ClvmOp::Ash, *arg, *shift),
-        Lir::Lsh(arg, shift) => op_list_binary(arena, locs, loc, ClvmOp::Lsh, *arg, *shift),
-        Lir::PubkeyForExp(arg) => op_list(
-            loc,
-            ClvmOp::PubkeyForExp,
-            vec![codegen_debug(arena, locs, *arg)],
-        ),
-        Lir::G1Add(args) => op_list_args(arena, locs, loc, ClvmOp::G1Add, args),
-        Lir::G1Subtract(args) => op_list_args(arena, locs, loc, ClvmOp::G1Subtract, args),
+        Lir::Logand(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Logand, args),
+        Lir::Logior(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Logior, args),
+        Lir::Logxor(args) => op_list_args(creator, arena, locs, loc, ClvmOp::Logxor, args),
+        Lir::Lognot(arg) => {
+            let lognot_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(creator, loc, ClvmOp::Lognot, vec![lognot_arg])
+        }
+        Lir::Ash(arg, shift) => op_list_binary(creator, arena, locs, loc, ClvmOp::Ash, *arg, *shift),
+        Lir::Lsh(arg, shift) => op_list_binary(creator, arena, locs, loc, ClvmOp::Lsh, *arg, *shift),
+        Lir::PubkeyForExp(arg) => {
+            let pke_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::PubkeyForExp,
+                vec![pke_arg],
+            )
+        }
+        Lir::G1Add(args) => op_list_args(creator, arena, locs, loc, ClvmOp::G1Add, args),
+        Lir::G1Subtract(args) => op_list_args(creator, arena, locs, loc, ClvmOp::G1Subtract, args),
         Lir::G1Multiply(first, second) => {
-            op_list_binary(arena, locs, loc, ClvmOp::G1Multiply, *first, *second)
+            op_list_binary(creator, arena, locs, loc, ClvmOp::G1Multiply, *first, *second)
         }
-        Lir::G1Negate(arg) => op_list(
-            loc,
-            ClvmOp::G1Negate,
-            vec![codegen_debug(arena, locs, *arg)],
-        ),
+        Lir::G1Negate(arg) => {
+            let g1neg_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::G1Negate,
+                vec![g1neg_arg],
+            )
+        }
         Lir::G1Map(value, dst) => {
-            let mut args = vec![codegen_debug(arena, locs, *value)];
+            let mut args = vec![codegen_debug(creator, arena, locs, *value)];
             if let Some(dst) = dst {
-                args.push(codegen_debug(arena, locs, *dst));
+                args.push(codegen_debug(creator, arena, locs, *dst));
             }
-            op_list(loc, ClvmOp::G1Map, args)
+            op_list(creator, loc, ClvmOp::G1Map, args)
         }
-        Lir::G2Add(args) => op_list_args(arena, locs, loc, ClvmOp::G2Add, args),
-        Lir::G2Subtract(args) => op_list_args(arena, locs, loc, ClvmOp::G2Subtract, args),
+        Lir::G2Add(args) => op_list_args(creator, arena, locs, loc, ClvmOp::G2Add, args),
+        Lir::G2Subtract(args) => op_list_args(creator, arena, locs, loc, ClvmOp::G2Subtract, args),
         Lir::G2Multiply(first, second) => {
-            op_list_binary(arena, locs, loc, ClvmOp::G2Multiply, *first, *second)
+            op_list_binary(creator, arena, locs, loc, ClvmOp::G2Multiply, *first, *second)
         }
-        Lir::G2Negate(arg) => op_list(
-            loc,
-            ClvmOp::G2Negate,
-            vec![codegen_debug(arena, locs, *arg)],
-        ),
+        Lir::G2Negate(arg) => {
+            let g2neg_arg = codegen_debug(creator, arena, locs, *arg);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::G2Negate,
+                vec![],
+            )
+        }
         Lir::G2Map(value, dst) => {
-            let mut args = vec![codegen_debug(arena, locs, *value)];
+            let mut args = vec![codegen_debug(creator, arena, locs, *value)];
             if let Some(dst) = dst {
-                args.push(codegen_debug(arena, locs, *dst));
+                args.push(codegen_debug(creator, arena, locs, *dst));
             }
-            op_list(loc, ClvmOp::G2Map, args)
+            op_list(creator, loc, ClvmOp::G2Map, args)
         }
         Lir::BlsPairingIdentity(args) => {
-            op_list_args(arena, locs, loc, ClvmOp::BlsPairingIdentity, args)
+            op_list_args(creator, arena, locs, loc, ClvmOp::BlsPairingIdentity, args)
         }
         Lir::BlsVerify(arg, args) => {
-            let mut items = vec![codegen_debug(arena, locs, *arg)];
-            items.extend(args.iter().map(|arg| codegen_debug(arena, locs, *arg)));
-            op_list(loc, ClvmOp::BlsVerify, items)
+            let mut items = vec![codegen_debug(creator, arena, locs, *arg)];
+            items.extend(args.iter().map(|arg| codegen_debug(creator, arena, locs, *arg)));
+            op_list(creator, loc, ClvmOp::BlsVerify, items)
         }
         Lir::Sha256(args) | Lir::Sha256Inline(args) => {
-            op_list_args(arena, locs, loc, ClvmOp::Sha256, args)
+            op_list_args(creator, arena, locs, loc, ClvmOp::Sha256, args)
         }
         Lir::Keccak256(args) | Lir::Keccak256Inline(args) => {
-            op_list_args(arena, locs, loc, ClvmOp::Keccak256, args)
+            op_list_args(creator, arena, locs, loc, ClvmOp::Keccak256, args)
         }
-        Lir::CoinId(parent, puzzle, amount) => op_list(
-            loc,
-            ClvmOp::CoinId,
-            vec![
-                codegen_debug(arena, locs, *parent),
-                codegen_debug(arena, locs, *puzzle),
-                codegen_debug(arena, locs, *amount),
-            ],
-        ),
-        Lir::K1Verify(pubkey, message, signature) => op_list(
-            loc,
-            ClvmOp::Secp256K1Verify,
-            vec![
-                codegen_debug(arena, locs, *pubkey),
-                codegen_debug(arena, locs, *message),
-                codegen_debug(arena, locs, *signature),
-            ],
-        ),
-        Lir::R1Verify(pubkey, message, signature) => op_list(
-            loc,
-            ClvmOp::Secp256R1Verify,
-            vec![
-                codegen_debug(arena, locs, *pubkey),
-                codegen_debug(arena, locs, *message),
-                codegen_debug(arena, locs, *signature),
-            ],
-        ),
-        Lir::Op(op, args) => {
-            let args = codegen_debug(arena, locs, *args);
+        Lir::CoinId(parent, puzzle, amount) => {
+            let coinid_parent = codegen_debug(creator, arena, locs, *parent);
+            let coinid_puzzle = codegen_debug(creator, arena, locs, *puzzle);
+            let coinid_amount = codegen_debug(creator, arena, locs, *amount);
             op_list(
-                loc.clone(),
-                ClvmOp::Apply,
+                creator,
+                loc,
+                ClvmOp::CoinId,
                 vec![
-                    op_list(
-                        loc.clone(),
-                        ClvmOp::Cons,
-                        vec![
-                            op_list(
-                                loc.clone(),
-                                ClvmOp::Cons,
-                                vec![
-                                    quote(loc.clone(), atom(loc.clone(), &op.to_atom())),
-                                    nil(loc.clone()),
-                                ],
-                            ),
-                            args,
-                        ],
-                    ),
-                    nil(loc),
+                    coinid_parent,
+                    coinid_puzzle,
+                    coinid_amount,
                 ],
             )
         }
-        Lir::DebugPrint(srcloc, value) => op_list(
-            loc.clone(),
-            ClvmOp::DebugPrint,
-            vec![
-                quote(loc.clone(), atom(loc.clone(), srcloc.as_bytes())),
-                codegen_debug(arena, locs, *value),
-            ],
-        ),
+        Lir::K1Verify(pubkey, message, signature) => {
+            let k1v_pubkey = codegen_debug(creator, arena, locs, *pubkey);
+            let k1v_message = codegen_debug(creator, arena, locs, *message);
+            let k1v_sig = codegen_debug(creator, arena, locs, *signature);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::Secp256K1Verify,
+                vec![
+                    k1v_pubkey,
+                    k1v_message,
+                    k1v_sig,
+                ],
+            )
+        }
+        Lir::R1Verify(pubkey, message, signature) => {
+            let r1v_pubkey = codegen_debug(creator, arena, locs, *pubkey);
+            let r1v_message = codegen_debug(creator, arena, locs, *message);
+            let r1v_sig = codegen_debug(creator, arena, locs, *signature);
+            op_list(
+                creator,
+                loc,
+                ClvmOp::Secp256R1Verify,
+                vec![
+                    r1v_pubkey,
+                    r1v_message,
+                    r1v_sig,
+                ],
+            )
+        }
+        Lir::Op(op, args) => {
+            let args = codegen_debug(creator, arena, locs, *args);
+            let op_nil_args = creator.atom(loc.clone(), &[]);
+            let op_data = creator.atom(loc.clone(), &op.to_atom());
+            let quoted_atom_head = quote(creator, loc.clone(), op_data);
+            let op_head_prog = op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::Cons,
+                vec![
+                    quoted_atom_head,
+                    op_nil_args.clone(),
+                ],
+            );
+
+            let op_head = op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::Cons,
+                vec![
+                    op_head_prog,
+                    args,
+                ],
+            );
+
+            op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::Apply,
+                vec![
+                    op_head,
+                    op_nil_args,
+                ],
+            )
+        }
+        Lir::DebugPrint(srcloc, value) => {
+            let quoted_prog_atom = creator.atom(loc.clone(), srcloc.as_bytes());
+            let quoted_prog = quote(creator, loc.clone(), quoted_prog_atom);
+            let args = codegen_debug(creator, arena, locs, *value);
+            op_list(
+                creator,
+                loc.clone(),
+                ClvmOp::DebugPrint,
+                vec![
+                    quoted_prog,
+                    args,
+                ],
+            )
+        }
     }
 }
 
 fn op_list_binary(
+    creator: &mut CreateRueSExp,
     arena: &Arena<Lir>,
     locs: &HashMap<LirId, RueSrcLoc>,
     loc: RueSrcLoc,
@@ -1380,35 +1571,52 @@ fn op_list_binary(
     first: LirId,
     second: LirId,
 ) -> RueSExp {
+    let op_first = codegen_debug(creator, arena, locs, first);
+    let op_rest = codegen_debug(creator, arena, locs, second);
     op_list(
+        creator,
         loc,
         op,
         vec![
-            codegen_debug(arena, locs, first),
-            codegen_debug(arena, locs, second),
+            op_first,
+            op_rest,
         ],
     )
 }
 
 fn op_list_args(
+    creator: &mut CreateRueSExp,
     arena: &Arena<Lir>,
     locs: &HashMap<LirId, RueSrcLoc>,
     loc: RueSrcLoc,
     op: ClvmOp,
     args: &[LirId],
 ) -> RueSExp {
+    let converted_args = args.iter()
+        .map(|arg| codegen_debug(creator, arena, locs, *arg))
+        .collect();
     op_list(
+        creator,
         loc,
         op,
-        args.iter()
-            .map(|arg| codegen_debug(arena, locs, *arg))
-            .collect(),
+        converted_args,
     )
 }
 
-struct SrcRepository {}
-
-fn rue_srcloc_to_chialisp(file_repo: &mut SrcRepository, loc: &SrcLoc) -> RueSrcLoc {
+// Given an iterator into a file, find the line and column of a specific position.
+fn create_line_map<'a, I>(src: &mut I, find: usize) -> Vec<usize>
+where
+    I: Iterator<Item=&'a u8>
+{
+    let mut result = vec![];
+    for (i,by) in src.enumerate() {
+        if *by == b'\n' {
+            result.push(i);
+        }
+    }
+    result
+}
+fn rue_srcloc_to_chialisp(loc: &SrcLoc) -> RueSrcLoc {
     let start = loc.start();
     let end = loc.end();
     let file = loc.source.kind.display(Path::new("."));
@@ -1421,54 +1629,51 @@ fn rue_srcloc_to_chialisp(file_repo: &mut SrcRepository, loc: &SrcLoc) -> RueSrc
     //out
 }
 
-fn source_to_start_loc(src_repository: &mut SrcRepository, source: &Source) -> RueSrcLoc {
-    todo!();
-    // SrcLoc::start(&source.kind.display(Path::new(".")))
+fn source_to_start_loc(source: &Source) -> RueSrcLoc {
+    RueSrcLoc {
+        raw: Rc::new(SrcLoc::new(source.clone(), std::ops::Range {
+            start: 0,
+            end: 0
+        }))
+    }
 }
 
 fn syntax_item_loc(
-    src_repository: &mut SrcRepository,
+    sources: &HashMap<SourceKind, Source>,
     source_kind: &SourceKind,
     span: rowan::TextRange,
-) -> Option<SrcLoc> {
-    todo!();
-    // let source = sources.get(source_kind)?;
-    // let start = rue_diagnostic::LineCol::new(&source.text, span.start().into());
-    // let end = rue_diagnostic::LineCol::new(&source.text, span.end().into());
-    // let mut loc = SrcLoc::new(
-    //     Rc::new(source.kind.display(Path::new("."))),
-    //     start.line + 1,
-    //     start.col + 1,
-    // );
-    // loc.until = Some(chialisp::compiler::srcloc::Until {
-    //     line: end.line + 1,
-    //     col: end.col + 1,
-    // });
-    // Some(loc)
+) -> Option<RueSrcLoc> {
+    sources.get(source_kind).map(|source| {
+        RueSrcLoc {
+            raw: Rc::new(SrcLoc::new(source.clone(), std::ops::Range {
+                start: span.start().into(),
+                end: span.end().into(),
+            }))
+        }
+    })
 }
 
 fn build_symbol_locs(
     ctx: &Compiler,
-    src_repository: &mut SrcRepository,
     tree: &FileTree,
 ) -> HashMap<SymbolId, RueSrcLoc> {
-    todo!();
-    // let sources: HashMap<SourceKind, Source> = tree
-    //     .all_files()
-    //     .into_iter()
-    //     .map(|file| (file.source.kind.clone(), file.source.clone()))
-    //     .collect();
-    // let mut result = HashMap::new();
+    let sources: HashMap<SourceKind, Source> = tree
+        .all_files()
+        .into_iter()
+        .map(|file| (file.source.kind.clone(), file.source.clone()))
+        .collect();
 
-    // for item in ctx.syntax_map().items() {
-    //     if let SyntaxItemKind::SymbolDeclaration(symbol) = item.kind {
-    //         if let Some(loc) = syntax_item_loc(&sources, &item.source_kind, item.span) {
-    //             result.insert(symbol, loc);
-    //         }
-    //     }
-    // }
+    let mut result = HashMap::new();
 
-    // result
+    for item in ctx.syntax_map().items() {
+        if let SyntaxItemKind::SymbolDeclaration(symbol) = item.kind {
+            if let Some(loc) = syntax_item_loc(&sources, &item.source_kind, item.span) {
+                result.insert(symbol, loc);
+            }
+        }
+    }
+
+    result
 }
 
 fn parameter_expression(names: &[String]) -> String {
@@ -1525,6 +1730,7 @@ struct RueCompileOutput {
 }
 
 fn compile_main(
+    creator: &mut CreateRueSExp,
     ctx: &mut Compiler,
     tree: &FileTree,
     main: SymbolId,
@@ -1537,12 +1743,11 @@ fn compile_main(
     let mut lir_locs = HashMap::new();
     let mut function_body_lirs = HashMap::new();
     let mut function_argument_trees = HashMap::new();
-    let mut src_repository = SrcRepository {};
     let source = "".to_string(); // XXX
     let fallback_loc = tree
         .all_files()
         .first()
-        .map(|file| source_to_start_loc(&mut src_repository, &file.source))
+        .map(|file| source_to_start_loc(&file.source))
         .unwrap_or_else(|| {
             RueSrcLoc::new(SrcLoc::new(
                 Source::new(source.into(), SourceKind::Std("*rue*".to_string())),
@@ -1566,7 +1771,7 @@ fn compile_main(
         lowerer.lower_symbol_value(&Environment::default(), main)
     };
 
-    let compiled = codegen_debug(&arena, &lir_locs, lir);
+    let compiled = codegen_debug(creator, &arena, &lir_locs, lir);
     let mut symbol_table = HashMap::new();
     let mut program_locations = HashMap::new();
 
@@ -1591,7 +1796,7 @@ fn compile_main(
             .unwrap_or_else(|| {
                 parameter_expression(&function.parameters.keys().cloned().collect::<Vec<_>>())
             });
-        let function_sexp = codegen_debug(&arena, &lir_locs, body_lir);
+        let function_sexp = codegen_debug(creator, &arena, &lir_locs, body_lir);
         let function_hash = hex::encode(function_sexp.sha256tree());
         add_function_symbol_metadata(&mut symbol_table, function_hash, &name, &arguments);
     }
@@ -1603,23 +1808,51 @@ fn compile_main(
     })
 }
 
-struct CreateRueSExp {}
+struct CreateRueSExp {
+    allocator: ClvmrAllocator,
+}
+
+impl CreateRueSExp {
+    fn new() -> Self {
+        CreateRueSExp {
+            allocator: ClvmrAllocator::default()
+        }
+    }
+}
 
 impl CreateSExp for CreateRueSExp {
     type S = RueSExp;
     type SL = RueSrcLoc;
 
     fn atom(&mut self, loc: Self::SL, bytes: &[u8]) -> Self::S {
-        todo!();
+        let acopy = self.allocator.clone();
+        self.allocator.with_allocator_mut(|a| {
+            RueSExp {
+                clvm: ClvmrWrapper {
+                    a: acopy,
+                    n: a.new_atom(bytes).unwrap(),
+                },
+                loc
+            }
+        })
     }
     fn cons(&mut self, loc: Self::SL, a: Self::S, b: Self::S) -> Self::S {
-        todo!();
+        let alloc_copy = self.allocator.clone();
+        self.allocator.with_allocator_mut(|allocator| {
+            RueSExp {
+                clvm: ClvmrWrapper {
+                    a: alloc_copy,
+                    n: allocator.new_pair(a.clvm.n, b.clvm.n).unwrap()
+                },
+                loc
+            }
+        })
     }
     fn start_srcloc(&mut self, name: &str) -> Self::SL {
-        todo!();
+        RueSrcLoc::start(name)
     }
     fn loc(&self, s: Self::S) -> Self::SL {
-        todo!();
+        s.loc()
     }
 
     fn parse_sexp<I>(
@@ -1630,7 +1863,20 @@ impl CreateSExp for CreateRueSExp {
     where
         I: Iterator<Item = u8>,
     {
-        todo!();
+        let data: Vec<u8> = input.collect();
+        let allocator_new_ref = self.allocator.clone();
+        let parsed = self.allocator.with_allocator_mut(|a| -> Result<Self::S, (Self::SL, String)> {
+            let decoded = decode_string(&data);
+            let assembled_node = assemble(a, &decoded).map_err(|e| (start.clone(), format!("{e:?}")))?;
+            Ok(RueSExp {
+                clvm: ClvmrWrapper {
+                    a: allocator_new_ref,
+                    n: assembled_node,
+                },
+                loc: start.clone(),
+            })
+        })?;
+        Ok(vec![parsed])
     }
 }
 
@@ -1641,6 +1887,7 @@ struct RueGenerateOutput {
 
 pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> {
     let mut allocator = ClvmrAllocator::default();
+    let mut creator = CreateRueSExp { allocator: allocator.clone() };
     let search_path = Path::new(&args.filename)
         .canonicalize()
         .map_err(|e| format!("failed to canonicalize {}: {e:?}", args.filename))?;
@@ -1658,7 +1905,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         }
     });
 
-    let mut src_repository = SrcRepository {};
     let mut ctx = Compiler::new(project.options);
     let tree = FileTree::compile_path(&mut ctx, &project.entrypoint, &mut HashMap::new())
         .map_err(|e| format!("failed to compile rue: {e:?}"))?;
@@ -1699,19 +1945,23 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         .scope(scope)
         .symbol("main")
         .ok_or_else(|| "no `main` function found in rue file".to_string())?;
-    let symbol_locs = build_symbol_locs(&ctx, &mut src_repository, &tree);
-    let output = compile_main(&mut ctx, &tree, main, base_path, &symbol_locs)?;
+    let symbol_locs = build_symbol_locs(&ctx, &tree);
+    let output = compile_main(&mut creator, &mut ctx, &tree, main, base_path, &symbol_locs)?;
 
     let env = allocator.with_allocator_mut(|a| {
         assemble(a, &args.env).map_err(|e| format!("failed to read env: {e:?}"))
     })?;
-    let env_loc = RueSrcLoc(Rc::new(SrcLoc::new(
-        Source::new("".to_string().into(), SourceKind::Std("*env*".to_string())),
-        std::ops::Range { start: 0, end: 0 },
-    )));
+    let env_loc = RueSrcLoc {
+        raw: Rc::new(SrcLoc::new(
+            Source::new("".to_string().into(), SourceKind::Std("*env*".to_string())),
+            std::ops::Range { start: 0, end: 0 },
+        ))
+    };
     let symbols = Rc::new(output.symbols.clone());
 
-    let mut creator = CreateRueSExp {};
+    let mut creator = CreateRueSExp {
+        allocator: allocator.clone()
+    };
     let program = Program::new(
         &mut creator,
         output.srclocs,
@@ -1738,11 +1988,10 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         .map_err(|e| format!("failed to create elf output: {e:?}"))
 }
 
-/*
 #[test]
 fn test_rue_compile_and_run_as_arm() {
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(3)".to_string(),
+        env: "(5)".to_string(),
         filename: "../resources/tests/factorial.rue".to_string(),
         output: "factorial.rue.elf".to_string(),
     }).unwrap();
@@ -1753,6 +2002,8 @@ fn test_rue_compile_and_run_as_arm() {
         TARGET_ADDR,
         compiled.symbols,
     ).unwrap();
-    todo!();
+    assert_eq!(
+        result.map(|result| disassemble(&allocator, result, None)),
+        Some("120".to_string())
+    );
 }
-*/

@@ -147,10 +147,10 @@ impl Srcloc for RueSrcLoc {
         self.raw.source.kind.display(Path::new("."))
     }
     fn line(&self) -> usize {
-        self.raw.start().line
+        self.raw.start().line + 1
     }
     fn col(&self) -> usize {
-        self.raw.start().col
+        self.raw.start().col + 1
     }
     fn overlap(&self, other: &Self) -> bool {
         todo!();
@@ -159,8 +159,8 @@ impl Srcloc for RueSrcLoc {
         if self.raw.span.end != self.raw.span.start {
             let cl = self.raw.end();
             return Some(Until {
-                line: cl.line as u32,
-                col: cl.col as u32
+                line: cl.line as u32 + 1,
+                col: cl.col as u32 + 1
             });
         }
 
@@ -177,8 +177,8 @@ impl std::fmt::Display for RueSrcLoc {
                 (formatter,
                  "{}({}):{}-{}({}):{}",
                  self.raw.source.kind.display(Path::new(".")),
-                 lc.line,
-                 lc.col,
+                 lc.line + 1,
+                 lc.col + 1,
                  self.raw.source.kind.display(Path::new(".")),
                  end.line,
                  end.col
@@ -188,8 +188,8 @@ impl std::fmt::Display for RueSrcLoc {
                 (formatter,
                  "{}({}):{}",
                  self.raw.source.kind.display(Path::new(".")),
-                 lc.line,
-                 lc.col,
+                 lc.line + 1,
+                 lc.col + 1,
                 )
         }
     }
@@ -217,12 +217,18 @@ impl SymbolGroup {
     }
 }
 
+#[derive(Clone)]
+struct FunctionBodyLirEntry {
+    lir_id: LirId,
+    loc: RueSrcLoc,
+}
+
 struct DebugLowerer<'d, 'a, 'g> {
     db: &'d mut Database,
     arena: &'a mut Arena<Lir>,
     graph: &'g DependencyGraph,
     lir_locs: &'a mut HashMap<LirId, RueSrcLoc>,
-    function_body_lirs: &'a mut HashMap<SymbolId, LirId>,
+    function_body_lirs: &'a mut HashMap<SymbolId, FunctionBodyLirEntry>,
     function_argument_trees: &'a mut HashMap<SymbolId, String>,
     inline_symbols: Vec<HashMap<SymbolId, HirId>>,
     options: rue_options::CompilerOptions,
@@ -239,7 +245,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         arena: &'a mut Arena<Lir>,
         graph: &'g DependencyGraph,
         lir_locs: &'a mut HashMap<LirId, RueSrcLoc>,
-        function_body_lirs: &'a mut HashMap<SymbolId, LirId>,
+        function_body_lirs: &'a mut HashMap<SymbolId, FunctionBodyLirEntry>,
         function_argument_trees: &'a mut HashMap<SymbolId, String>,
         options: rue_options::CompilerOptions,
         main: SymbolId,
@@ -293,13 +299,17 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
             .get(&symbol)
             .cloned()
             .unwrap_or_else(|| self.current_loc.clone());
-        self.with_loc(loc, |lowerer| match lowerer.db.symbol(symbol).clone() {
-            Symbol::Unresolved | Symbol::Module(_) | Symbol::Parameter(_) | Symbol::Builtin(_) => {
-                unreachable!()
+        self.with_loc(loc.clone(), |lowerer| {
+            let sym = lowerer.db.symbol(symbol);
+            eprintln!("with_loc {loc} symbol {sym:?}");
+            match sym.clone() {
+                Symbol::Unresolved | Symbol::Module(_) | Symbol::Parameter(_) | Symbol::Builtin(_) => {
+                    unreachable!()
+                }
+                Symbol::Function(function) => lowerer.lower_function(env, symbol, function),
+                Symbol::Constant(constant) => lowerer.lower_constant(env, constant),
+                Symbol::Binding(binding) => lowerer.lower_binding(env, binding),
             }
-            Symbol::Function(function) => lowerer.lower_function(env, symbol, function),
-            Symbol::Constant(constant) => lowerer.lower_constant(env, constant),
-            Symbol::Binding(binding) => lowerer.lower_binding(env, binding),
         })
     }
 
@@ -353,6 +363,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
             argument_tree_expression(&function_env, &function.parameters),
         );
 
+        eprintln!("lower function body at src loc {}", self.current_loc);
         let mut expr = self.lower_hir(&function_env, function.body);
 
         if symbol == self.main {
@@ -392,10 +403,16 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
                 expr = self.alloc_here(Lir::Run(expr, group_env));
             }
 
-            self.function_body_lirs.insert(symbol, expr);
+            self.function_body_lirs.insert(symbol, FunctionBodyLirEntry {
+                lir_id: expr,
+                loc: self.current_loc.clone(),
+            });
             expr
         } else {
-            self.function_body_lirs.insert(symbol, expr);
+            self.function_body_lirs.insert(symbol, FunctionBodyLirEntry {
+                lir_id: expr,
+                loc: self.current_loc.clone(),
+            });
             self.alloc_here(Lir::Quote(expr))
         }
     }
@@ -1617,16 +1634,7 @@ where
     result
 }
 fn rue_srcloc_to_chialisp(loc: &SrcLoc) -> RueSrcLoc {
-    let start = loc.start();
-    let end = loc.end();
-    let file = loc.source.kind.display(Path::new("."));
-    todo!();
-    // let mut out = RueSrcLoc::new(SrcLoc::new(SourceKind::File(file), std::ops::Range { start: start.line + 1, start.col + 1);
-    //out.until = Some(chialisp::compiler::srcloc::Until {
-    //line: end.line + 1,
-    //col: end.col + 1,
-    //});
-    //out
+    RueSrcLoc::new(loc.clone())
 }
 
 fn source_to_start_loc(source: &Source) -> RueSrcLoc {
@@ -1743,7 +1751,7 @@ fn compile_main(
     let mut lir_locs = HashMap::new();
     let mut function_body_lirs = HashMap::new();
     let mut function_argument_trees = HashMap::new();
-    let source = "".to_string(); // XXX
+    let source = base_path.display().to_string();
     let fallback_loc = tree
         .all_files()
         .first()
@@ -1787,7 +1795,7 @@ fn compile_main(
             continue;
         };
 
-        let Some(body_lir) = function_body_lirs.get(&symbol).copied() else {
+        let Some(body_lir) = function_body_lirs.get(&symbol).cloned() else {
             continue;
         };
         let arguments = function_argument_trees
@@ -1796,7 +1804,8 @@ fn compile_main(
             .unwrap_or_else(|| {
                 parameter_expression(&function.parameters.keys().cloned().collect::<Vec<_>>())
             });
-        let function_sexp = codegen_debug(creator, &arena, &lir_locs, body_lir);
+        lir_locs.insert(body_lir.lir_id.clone(), body_lir.loc.clone());
+        let function_sexp = codegen_debug(creator, &arena, &lir_locs, body_lir.lir_id);
         let function_hash = hex::encode(function_sexp.sha256tree());
         add_function_symbol_metadata(&mut symbol_table, function_hash, &name, &arguments);
     }
@@ -1990,12 +1999,14 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
 
 #[test]
 fn test_rue_compile_and_run_as_arm() {
+    let output = "factorial.rue.elf";
     let compiled = compile_rue_to_arm_elf(&Args {
         env: "(5)".to_string(),
         filename: "../resources/tests/factorial.rue".to_string(),
-        output: "factorial.rue.elf".to_string(),
+        output: output.to_string(),
     }).unwrap();
     let mut allocator = Allocator::new();
+    std::fs::write(output, &compiled.object.object_file).unwrap();
     let result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,

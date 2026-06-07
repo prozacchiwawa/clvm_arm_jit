@@ -929,6 +929,7 @@ impl DwarfBuilder {
             || begin_end_block == Some(BeginEndBlock::BeginBlock)
             || source_changed
             || control_flow_or_dispatch;
+        eprintln!("{addr} source_line_key {source_line_key:?} - is_statement {is_statement} {source_changed} source_changed cfd {control_flow_or_dispatch}");
         if is_statement && !using_synthetic_file {
             let same_statement_source_line = self
                 .last_statement_source_line
@@ -944,24 +945,27 @@ impl DwarfBuilder {
                 using_synthetic_file = true;
             }
         }
-        let unit = self.dwarf.units.get_mut(self.unit_id);
-        let row = unit.line_program.row();
-        row.address_offset = (addr - self.seq_addr_start) as u64;
-        row.file = file_id;
-        row.line = line;
-        row.column = col;
-        row.is_statement = is_statement;
-        row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
-        let emitted_statement = row.is_statement;
-        unit.line_program.generate_row();
-        if emitted_statement {
-            if using_synthetic_file {
-                self.last_statement_source_line = None;
-            } else {
-                self.last_statement_source_line = Some(source_line_key);
+
+        if is_statement && !source_changed && !control_flow_or_dispatch {
+            let unit = self.dwarf.units.get_mut(self.unit_id);
+            let row = unit.line_program.row();
+            row.address_offset = (addr - self.seq_addr_start) as u64;
+            row.file = file_id;
+            row.line = line;
+            row.column = col;
+            row.is_statement = is_statement;
+            row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
+            let emitted_statement = row.is_statement;
+            unit.line_program.generate_row();
+            if emitted_statement {
+                if using_synthetic_file {
+                    self.last_statement_source_line = None;
+                } else {
+                    self.last_statement_source_line = Some(source_line_key);
+                }
             }
+            self.last_row_source = Some(source_key);
         }
-        self.last_row_source = Some(source_key);
     }
 
     fn start(&mut self, addr: usize) {

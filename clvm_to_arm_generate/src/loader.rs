@@ -161,23 +161,23 @@ impl<'a> ElfLoader<'a> {
         };
 
         let symbol = &symbols[r.sym()];
-        eprintln!(
-            "R {kind:?} {symbol:?} {in_section} {reloc_at_addr:08x} reloc {r:?} = {existing_data:08x}"
-        );
+        // eprintln!(
+        //     "R {kind:?} {symbol:?} {in_section} {reloc_at_addr:08x} reloc {r:?} = {existing_data:08x}"
+        // );
 
         match kind {
             Some(ElfRelaType::RArmJmp) => {
                 // Straight signed 24.
                 let val_s = (symbol.st_value + sections[symbol.st_shndx as usize]) as i32;
-                eprintln!(
-                    "relocate jmp targeting section at {:x}",
-                    sections[symbol.st_shndx as usize]
-                );
+                // eprintln!(
+                //     "relocate jmp targeting section at {:x}",
+                //     sections[symbol.st_shndx as usize]
+                // );
                 let val_p = (sections[in_section] + r.offset) as i32;
                 let val_a = r.addend;
                 let final_value =
                     (((((val_s - val_p + val_a) - 4) >> 2) & 0xffffff) as u32) | existing_data;
-                eprintln!("S {val_s:08x} P {val_p:08x} A {val_a:08x} => {final_value:08x}");
+                // eprintln!("S {val_s:08x} P {val_p:08x} A {val_a:08x} => {final_value:08x}");
                 memory.write_u32(reloc_at_addr, existing_data | final_value);
             }
             Some(_) => {
@@ -189,7 +189,7 @@ impl<'a> ElfLoader<'a> {
                 } else {
                     val_s + val_a
                 };
-                eprintln!("S {val_s:08x} A {val_a:08x} => {final_value:08x}");
+                // eprintln!("S {val_s:08x} A {val_a:08x} => {final_value:08x}");
                 memory.write_i32(reloc_at_addr, final_value + existing_data as i32);
             }
             _ => todo!(),

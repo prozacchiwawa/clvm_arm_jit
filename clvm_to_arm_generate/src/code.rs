@@ -894,6 +894,7 @@ impl DwarfBuilder {
         {
             return;
         }
+
         let source_file = loc.filename();
         let source_key = (source_file.clone(), loc.line() as u64, loc.col() as u64);
         let source_line_key = (source_file, loc.line() as u64);
@@ -929,7 +930,6 @@ impl DwarfBuilder {
             || begin_end_block == Some(BeginEndBlock::BeginBlock)
             || source_changed
             || control_flow_or_dispatch;
-        eprintln!("{addr} source_line_key {source_line_key:?} - is_statement {is_statement} {source_changed} source_changed cfd {control_flow_or_dispatch}");
         if is_statement && !using_synthetic_file {
             let same_statement_source_line = self
                 .last_statement_source_line
@@ -946,7 +946,7 @@ impl DwarfBuilder {
             }
         }
 
-        if is_statement && !source_changed && !control_flow_or_dispatch {
+        if is_statement || source_changed || control_flow_or_dispatch {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let row = unit.line_program.row();
             row.address_offset = (addr - self.seq_addr_start) as u64;

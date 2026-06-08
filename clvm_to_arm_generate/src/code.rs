@@ -1176,11 +1176,6 @@ impl DwarfBuilder {
         // at from, then decorate all of them with the argument retriever below.
 
         let mut subprogram_names = vec![name.clone()];
-        if name != label {
-            // Keep a typed DIE for both the colloquial and emitted symbol names so
-            // either one resolves to the same pointer return type in debuggers.
-            subprogram_names.push(label.to_string());
-        }
         let subprogram_ids = {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let mut subprogram_ids = Vec::with_capacity(subprogram_names.len());

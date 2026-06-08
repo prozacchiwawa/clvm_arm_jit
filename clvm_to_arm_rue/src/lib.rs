@@ -97,22 +97,6 @@ impl RueSExp {
             }
         }
     }
-
-    fn display_with_lines(&self, indent: usize) {
-        for _ in 0..indent {
-            eprint!("  ");
-        }
-        match &self.kind {
-            RueSExpKind::Cons(a, b) => {
-                eprintln!("cons {}", self.loc);
-                a.display_with_lines(indent + 1);
-                b.display_with_lines(indent + 1);
-            }
-            RueSExpKind::Atom => {
-                eprintln!("[{self}]' atom {}", self.loc);
-            }
-        }
-    }
 }
 
 fn sexp_kind_of(node: RueSExp) -> RueSExpKind {
@@ -1981,9 +1965,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
     };
     let symbols = Rc::new(output.symbols.clone());
 
-    eprintln!("output.program {}", output.program);
-    output.program.display_with_lines(0);
-    
     let mut creator = CreateRueSExp {
         allocator: allocator.clone()
     };
@@ -2027,5 +2008,4 @@ fn test_rue_compile_and_run_as_arm() {
         result.map(|result| disassemble(&allocator, result, None)),
         Some("120".to_string())
     );
-    todo!();
 }

@@ -53,14 +53,6 @@ impl ClvmrWrapper {
     {
         self.a.with_allocator(f)
     }
-
-    #[cfg(test)]
-    fn with_allocator_mut<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut Allocator) -> R,
-    {
-        self.a.with_allocator_mut(f)
-    }
 }
 
 impl Display for ClvmrWrapper {

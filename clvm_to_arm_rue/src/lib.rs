@@ -16,12 +16,17 @@ use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
 #[cfg(test)]
+use clvmr::Allocator;
+
+#[cfg(test)]
 use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 
 use chialisp::classic::clvm_tools::binutils::assemble;
+#[cfg(test)]
+use chialisp::classic::clvm_tools::binutils::disassemble;
 use chialisp::classic::clvm_tools::sha256tree::sha256tree;
 use chialisp::compiler::sexp::decode_string;
 use chialisp::util::Number;

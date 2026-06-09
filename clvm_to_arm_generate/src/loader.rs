@@ -75,7 +75,7 @@ impl<'a> ElfLoader<'a> {
         };
 
         let mut section_addr = target_addr;
-        for (i, s) in loader.elf.section_header_iter().enumerate() {
+        for s in loader.elf.section_header_iter() {
             if s.flags().contains(SectionHeaderFlags::SHF_ALLOC) {
                 let align_mask = (s.addralign() - 1) as u32;
                 section_addr = (section_addr + align_mask) & !align_mask;
@@ -251,10 +251,10 @@ impl<'a> ElfLoader<'a> {
         // Collect relocation sections and set loaded data.
         for (i, s) in self.elf.section_header_iter().enumerate() {
             let section_addr = self.sections[i];
-            if s.flags().contains(SectionHeaderFlags::SHF_ALLOC) {
-                if let Some(content) = s.content() {
-                    memory.write_data(content, section_addr);
-                }
+            if s.flags().contains(SectionHeaderFlags::SHF_ALLOC)
+                && let Some(content) = s.content()
+            {
+                memory.write_data(content, section_addr);
             }
         }
 

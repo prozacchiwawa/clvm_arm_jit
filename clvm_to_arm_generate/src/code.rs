@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use std::mem::swap;
@@ -906,8 +906,8 @@ impl DwarfBuilder {
         let synthetic_file_id = self
             .synthetic_file_id
             .expect("synthetic source file registered");
-        let mut using_synthetic_file = loc.filename().starts_with('*');
-        let (mut file_id, mut line, mut col) = if using_synthetic_file {
+        let using_synthetic_file = loc.filename().starts_with('*');
+        let (file_id, line, col) = if using_synthetic_file {
             (
                 synthetic_file_id,
                 self.add_synthetic_line::<C>(loc, source_sexp),
@@ -961,7 +961,6 @@ impl DwarfBuilder {
             row.column = col;
             row.is_statement = is_statement;
             row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
-            let emitted_statement = row.is_statement;
             unit.line_program.generate_row();
 
             self.last_row_source = Some(new_last_row);
@@ -1175,7 +1174,7 @@ impl DwarfBuilder {
         // We'll make 3 subprograms to represent where the current arguments can be arrived
         // at from, then decorate all of them with the argument retriever below.
 
-        let subprogram_names = vec![name.clone()];
+        let subprogram_names = [name.clone()];
         let subprogram_ids = {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let mut subprogram_ids = Vec::with_capacity(subprogram_names.len());
@@ -1869,7 +1868,7 @@ impl<C: CreateSExp> Program<C> {
         source_sexp: C::S,
         srcloc: &C::SL,
         instr: Instr,
-        mut begin_end_block: Option<BeginEndBlock>,
+        begin_end_block: Option<BeginEndBlock>,
     ) {
         let size = instr.size(self.current_addr);
         let insert_instr = if let Instr::Globl(g) = &instr {
@@ -2238,15 +2237,15 @@ impl<C: CreateSExp> Program<C> {
 
         // Capture mappings from function symbols to names (one per target).
         for i in self.finished_insns.iter() {
-            if let Instr::Globl(defname) = i {
-                if let Some(funname) = self.function_symbols.get(defname) {
-                    // XXX When a bare symbol exists with no other information that
-                    // XXX matches the looked-up name, gdb can set a breakpoint in
-                    // XXX the containing block, which is the whole compilation unit
-                    // XXX in this case.  Revisit this when we know how to mark up
-                    // XXX the named symbol properly.
-                    defined_with_name.insert(format!("_$_{funname}"), defname.clone());
-                }
+            if let Instr::Globl(defname) = i
+                && let Some(funname) = self.function_symbols.get(defname)
+            {
+                // XXX When a bare symbol exists with no other information that
+                // XXX matches the looked-up name, gdb can set a breakpoint in
+                // XXX the containing block, which is the whole compilation unit
+                // XXX in this case.  Revisit this when we know how to mark up
+                // XXX the named symbol properly.
+                defined_with_name.insert(format!("_$_{funname}"), defname.clone());
             }
         }
 
@@ -2269,8 +2268,6 @@ impl<C: CreateSExp> Program<C> {
                     if data_section {
                         data = name.clone();
                         return Some((data.clone(), Decl::data().global().into()));
-                    } else if name == "_start" {
-                        return Some((name.to_string(), Decl::function().into()));
                     } else {
                         return Some((name.to_string(), Decl::function().into()));
                     };

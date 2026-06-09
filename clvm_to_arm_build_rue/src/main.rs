@@ -25,7 +25,7 @@ fn compile_rue_code(args: &CmdArgs) -> Result<(), String> {
     (|| -> Result<(), std::io::Error> {
         std::fs::write(&args.output, &compiled.object.object_file)?;
         std::fs::write(
-            &format!("{}.clsp", args.output),
+            format!("{}.clsp", args.output),
             compiled.object.synthetic_source.as_bytes(),
         )?;
         Ok(())

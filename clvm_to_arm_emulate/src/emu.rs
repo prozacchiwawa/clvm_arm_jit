@@ -704,7 +704,7 @@ impl Emu {
             // Allocate space for this thunk.
             self.mem.write_u32(
                 alloc_address,
-                (new_code_address + instruction_list.len() as u32 * 4) as u32,
+                new_code_address + instruction_list.len() as u32 * 4,
             );
 
             let mut relocations = Vec::new();

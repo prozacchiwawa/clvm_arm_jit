@@ -2,9 +2,6 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
-
-use clvmr::Allocator;
 
 use id_arena::Arena;
 use indexmap::{IndexMap, IndexSet};
@@ -18,13 +15,13 @@ use rue_hir::{
 use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
+#[cfg(test)]
 use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 
-use chialisp::classic::clvm::sexp::proper_list;
-use chialisp::classic::clvm_tools::binutils::{assemble, disassemble};
+use chialisp::classic::clvm_tools::binutils::assemble;
 use chialisp::classic::clvm_tools::sha256tree::sha256tree;
 use chialisp::compiler::sexp::decode_string;
 use chialisp::util::Number;
@@ -86,14 +83,6 @@ impl RueSExp {
                 loc: loc.clone(),
             }
         }
-    }
-}
-
-fn sexp_kind_of(node: RueSExp) -> RueSExpKind {
-    match node.explode() {
-        SExpValue::Nil => RueSExpKind::Atom,
-        SExpValue::Atom(_) => RueSExpKind::Atom,
-        SExpValue::Cons(a, b) => RueSExpKind::Cons(Rc::new(a.clone()), Rc::new(b.clone())),
     }
 }
 
@@ -254,18 +243,12 @@ impl SymbolGroup {
     }
 }
 
-#[derive(Clone)]
-struct FunctionBodyLirEntry {
-    lir_id: LirId,
-    loc: RueSrcLoc,
-}
-
 struct DebugLowerer<'d, 'a, 'g> {
     db: &'d mut Database,
     arena: &'a mut Arena<Lir>,
     graph: &'g DependencyGraph,
     lir_locations: &'a mut HashMap<LirId, RueSrcLoc>,
-    function_body_lirs: &'a mut HashMap<SymbolId, FunctionBodyLirEntry>,
+    function_body_lirs: &'a mut HashMap<SymbolId, LirId>,
     function_argument_trees: &'a mut HashMap<SymbolId, String>,
     inline_symbols: Vec<HashMap<SymbolId, HirId>>,
     options: rue_options::CompilerOptions,
@@ -282,7 +265,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         arena: &'a mut Arena<Lir>,
         graph: &'g DependencyGraph,
         lir_locations: &'a mut HashMap<LirId, RueSrcLoc>,
-        function_body_lirs: &'a mut HashMap<SymbolId, FunctionBodyLirEntry>,
+        function_body_lirs: &'a mut HashMap<SymbolId, LirId>,
         function_argument_trees: &'a mut HashMap<SymbolId, String>,
         options: rue_options::CompilerOptions,
         main: SymbolId,
@@ -306,12 +289,12 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         }
     }
 
-    fn alloc(&mut self, lir: Lir, loc: RueSrcLoc) -> LirId {
+    fn alloc(&mut self, lir: Lir) -> LirId {
         self.arena.alloc(lir)
     }
 
     fn alloc_here(&mut self, lir: Lir) -> LirId {
-        let id = self.alloc(lir, self.current_loc.clone());
+        let id = self.alloc(lir);
         self.lir_locations.insert(id, self.current_loc.clone());
         id
     }
@@ -441,22 +424,10 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
                 expr = self.alloc_here(Lir::Run(expr, group_env));
             }
 
-            self.function_body_lirs.insert(
-                symbol,
-                FunctionBodyLirEntry {
-                    lir_id: expr,
-                    loc: self.current_loc.clone(),
-                },
-            );
+            self.function_body_lirs.insert(symbol, expr);
             expr
         } else {
-            self.function_body_lirs.insert(
-                symbol,
-                FunctionBodyLirEntry {
-                    lir_id: expr,
-                    loc: self.current_loc.clone(),
-                },
-            );
+            self.function_body_lirs.insert(symbol, expr);
             self.alloc_here(Lir::Quote(expr))
         }
     }
@@ -1252,10 +1223,10 @@ fn build_symbol_locs(ctx: &Compiler, tree: &FileTree) -> HashMap<SymbolId, RueSr
     let mut result = HashMap::new();
 
     for item in ctx.syntax_map().items() {
-        if let SyntaxItemKind::SymbolDeclaration(symbol) = item.kind {
-            if let Some(loc) = syntax_item_loc(&sources, &item.source_kind, item.span) {
-                result.insert(symbol, loc);
-            }
+        if let SyntaxItemKind::SymbolDeclaration(symbol) = item.kind
+            && let Some(loc) = syntax_item_loc(&sources, &item.source_kind, item.span)
+        {
+            result.insert(symbol, loc);
         }
     }
 
@@ -1312,7 +1283,6 @@ impl<'a> CodegenContext<'a> {
             false
         };
         let result = self.codegen_debug_(lir);
-        let loc = self.current_loc[self.current_loc.len() - 1];
         if restore {
             self.current_loc.pop();
         }
@@ -1482,7 +1452,7 @@ impl<'a> CodegenContext<'a> {
             }
             Lir::G2Negate(arg) => {
                 let g2neg_arg = self.codegen_debug(*arg);
-                self.op_list(ClvmOp::G2Negate, vec![])
+                self.op_list(ClvmOp::G2Negate, vec![g2neg_arg])
             }
             Lir::G2Map(value, dst) => {
                 let mut args = vec![self.codegen_debug(*value)];
@@ -1640,7 +1610,7 @@ fn compile_main(
     let compiled = cgctx.codegen_debug(lir);
 
     let mut symbol_table = HashMap::new();
-    let mut program_locations = HashMap::new();
+    let program_locations = HashMap::new();
 
     let relevant_declarations = ctx.relevant_declarations().collect::<Vec<_>>();
     for item in relevant_declarations {
@@ -1663,7 +1633,7 @@ fn compile_main(
             .unwrap_or_else(|| {
                 parameter_expression(&function.parameters.keys().cloned().collect::<Vec<_>>())
             });
-        let function_sexp = cgctx.codegen_debug(body_lir.lir_id);
+        let function_sexp = cgctx.codegen_debug(body_lir);
         let function_hash = hex::encode(function_sexp.sha256tree());
         add_function_symbol_metadata(&mut symbol_table, function_hash, &name, &arguments);
     }
@@ -1750,10 +1720,7 @@ pub struct RueGenerateOutput {
 }
 
 pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> {
-    let mut allocator = ClvmrAllocator::default();
-    let mut creator = CreateRueSExp {
-        allocator: allocator.clone(),
-    };
+    let mut creator = CreateRueSExp::new();
     let search_path = Path::new(&args.filename)
         .canonicalize()
         .map_err(|e| format!("failed to canonicalize {}: {e:?}", args.filename))?;
@@ -1814,7 +1781,7 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
     let symbol_locs = build_symbol_locs(&ctx, &tree);
     let output = compile_main(&mut creator, &mut ctx, &tree, main, base_path, &symbol_locs)?;
 
-    let env = allocator.with_allocator_mut(|a| {
+    let env = creator.allocator.with_allocator_mut(|a| {
         assemble(a, &args.env).map_err(|e| format!("failed to read env: {e:?}"))
     })?;
     let env_loc = RueSrcLoc {
@@ -1826,25 +1793,23 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
     let symbols = Rc::new(output.symbols.clone());
 
     let mut creator = CreateRueSExp {
-        allocator: allocator.clone(),
+        allocator: creator.allocator.clone(),
     };
+    let rue_env = RueSExp::from_node(creator.allocator.clone(), &env_loc, env);
     let program = Program::new(
         &mut creator,
         output.srclocs,
         &args.filename,
         &args.output,
         output.program,
-        RueSExp::from_node(allocator.clone(), &env_loc, env),
+        rue_env,
         TARGET_ADDR,
         symbols.clone(),
     )?;
 
     program
         .to_elf(&args.output)
-        .map(|p| RueGenerateOutput {
-            object: p,
-            symbols: symbols,
-        })
+        .map(|p| RueGenerateOutput { object: p, symbols })
         .map_err(|e| format!("failed to create elf output: {e:?}"))
 }
 

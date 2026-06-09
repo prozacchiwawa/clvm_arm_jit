@@ -919,25 +919,23 @@ impl DwarfBuilder {
         };
 
         // Figure out whether the source changed.
-        let source_changed =
-            if let Some(last) = self.last_row_source.as_ref() {
-                source_file != last.filename ||
-                    line != last.line ||
-                    col != last.col
-            } else {
-                true
-            };
+        let source_changed = if let Some(last) = self.last_row_source.as_ref() {
+            source_file != last.filename || line != last.line || col != last.col
+        } else {
+            true
+        };
 
-        let new_last_row =
-            if let Some(last_row) = &self.last_row_source && !source_changed {
-                last_row.clone()
-            } else {
-                DwarfLineRow {
-                    filename: source_file.clone(),
-                    line,
-                    col,
-                }
-            };
+        let new_last_row = if let Some(last_row) = &self.last_row_source
+            && !source_changed
+        {
+            last_row.clone()
+        } else {
+            DwarfLineRow {
+                filename: source_file.clone(),
+                line,
+                col,
+            }
+        };
 
         let control_flow_or_dispatch = matches!(
             instr,
@@ -2081,7 +2079,12 @@ impl<C: CreateSExp> Program<C> {
             Instr::Swi(SWI_PRINT_EXPR),
             Instr::Swi(SWI_DONE),
         ] {
-            self.push(creator, source_sexp.clone(), &creator.loc(source_sexp.clone()), i.clone());
+            self.push(
+                creator,
+                source_sexp.clone(),
+                &creator.loc(source_sexp.clone()),
+                i.clone(),
+            );
         }
 
         // Epilogue doesn't really matter since we did SWI_DONE, but it has symmetry
@@ -2094,7 +2097,12 @@ impl<C: CreateSExp> Program<C> {
             Instr::Subi(Register::SP, Register::FP, 4),
             Instr::Pop(vec![Register::FP, Register::LR]),
         ] {
-            self.push(creator, source_sexp.clone(), &creator.loc(source_sexp.clone()), i.clone());
+            self.push(
+                creator,
+                source_sexp.clone(),
+                &creator.loc(source_sexp.clone()),
+                i.clone(),
+            );
         }
 
         self.push_be(
@@ -2184,18 +2192,13 @@ impl<C: CreateSExp> Program<C> {
         Ok(())
     }
 
-    fn mutate_insn_with_functions(
-        &self,
-        defined: &HashMap<String, String>,
-        i: &Instr
-    ) -> Instr {
-        let name_to_replace =
-            match i {
-                Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
-                    Some(l)
-                }
-                _ => None
-            };
+    fn mutate_insn_with_functions(&self, defined: &HashMap<String, String>, i: &Instr) -> Instr {
+        let name_to_replace = match i {
+            Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
+                Some(l)
+            }
+            _ => None,
+        };
 
         let potential_rename = name_to_replace.and_then(|name| self.function_symbols.get(name));
         let chosen_rename = potential_rename.and_then(|name| defined.get(name));
@@ -2207,15 +2210,14 @@ impl<C: CreateSExp> Program<C> {
 
         if let Some(new_name) = potential_rename.cloned() {
             let new_name = format!("_$_{new_name}");
-            return
-                match i {
-                    Instr::Globl(_) => Instr::Globl(new_name),
-                    Instr::Label(_) => Instr::Label(new_name),
-                    Instr::B(_) => Instr::B(new_name),
-                    Instr::Bl(_) => Instr::Bl(new_name),
-                    Instr::Addr(_, v) => Instr::Addr(new_name, *v),
-                    _ => i.clone()
-                };
+            return match i {
+                Instr::Globl(_) => Instr::Globl(new_name),
+                Instr::Label(_) => Instr::Label(new_name),
+                Instr::B(_) => Instr::B(new_name),
+                Instr::Bl(_) => Instr::Bl(new_name),
+                Instr::Addr(_, v) => Instr::Addr(new_name, *v),
+                _ => i.clone(),
+            };
         }
 
         i.clone()
@@ -2248,15 +2250,11 @@ impl<C: CreateSExp> Program<C> {
             }
         }
 
-
         let mut decls: Vec<(String, Decl)> = self
             .finished_insns
             .iter()
             .filter_map(|i| {
-                let i = self.mutate_insn_with_functions(
-                    &defined_with_name,
-                    i
-                );
+                let i = self.mutate_insn_with_functions(&defined_with_name, i);
                 if let Instr::Section(name) = i {
                     if name.starts_with(".debug") || name.starts_with(".eh") {
                         waiting_for_debug_info = Some(name.clone());
@@ -2302,35 +2300,28 @@ impl<C: CreateSExp> Program<C> {
         let mut in_function = None;
 
         let mut produced_code = 0;
-        let mut handle_def_end = |function_body: &mut Vec<u8>,
-                                  in_function: &mut Option<String>|
-         -> Result<(), String> {
-            if let Some(defname) = in_function.as_ref()
-                && !function_body.is_empty()
-            {
-                let mut aligned_body = function_body.clone();
-                while !aligned_body.len().is_multiple_of(16) {
-                    aligned_body.push(0);
+        let mut handle_def_end =
+            |function_body: &mut Vec<u8>, in_function: &mut Option<String>| -> Result<(), String> {
+                if let Some(defname) = in_function.as_ref()
+                    && !function_body.is_empty()
+                {
+                    let mut aligned_body = function_body.clone();
+                    while !aligned_body.len().is_multiple_of(16) {
+                        aligned_body.push(0);
+                    }
+                    produced_code += aligned_body.len();
+                    obj.define(defname, aligned_body)
+                        .map_err(|e| format!("{e:?}"))?;
+                    *function_body = Vec::new();
                 }
-                produced_code += aligned_body.len();
-                obj.define(defname, aligned_body)
-                    .map_err(|e| format!("{e:?}"))?;
-                *function_body = Vec::new();
-            }
 
-            Ok(())
-        };
+                Ok(())
+            };
 
         for i in self.finished_insns.iter() {
-            let insn_with_function_names = self.mutate_insn_with_functions(
-                &defined_with_name,
-                i
-            );
+            let insn_with_function_names = self.mutate_insn_with_functions(&defined_with_name, i);
             if let Instr::Globl(name) = &insn_with_function_names {
-                handle_def_end(
-                    &mut function_body,
-                    &mut in_function,
-                )?;
+                handle_def_end(&mut function_body, &mut in_function)?;
                 in_function = Some(name.to_string());
             }
 
@@ -2339,10 +2330,7 @@ impl<C: CreateSExp> Program<C> {
             }
         }
 
-        handle_def_end(
-            &mut function_body,
-            &mut in_function,
-        )?;
+        handle_def_end(&mut function_body, &mut in_function)?;
         // Create .debug_aranges
         let mut debug_aranges: Vec<u8> = (0..0x20).map(|_| 0).collect();
         write_u32(&mut debug_aranges, 0, 0x1c);

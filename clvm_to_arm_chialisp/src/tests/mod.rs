@@ -15,10 +15,10 @@ use chialisp::compiler::srcloc::Srcloc;
 use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
-use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
+use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
 
-use crate::sexp_trait::{CreateChialispSExp, SrclocWrap, RcSExp};
+use crate::sexp_trait::{CreateChialispSExp, RcSExp, SrclocWrap};
 
 #[cfg(test)]
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
@@ -57,7 +57,8 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
     let tmpfile = NamedTempFile::new().expect("should be able to make a temp file");
     let tmpname = tmpfile.path().to_str().unwrap().to_string();
     let symbols = Rc::new(symbol_table);
-    let generator = Program::new::<CreateChialispSExp>(
+    let generator = Program::new(
+        &mut CreateChialispSExp,
         range_results,
         filename,
         &tmpname,

@@ -64,7 +64,7 @@ struct ElfRelocations {
 impl<'a> ElfLoader<'a> {
     pub fn new(elf_bytes: &'a [u8], target_addr: u32) -> Result<Self, Error> {
         let mut loader = ElfLoader {
-            elf: Elf::from_bytes(&elf_bytes)?,
+            elf: Elf::from_bytes(elf_bytes)?,
             upper_addr: target_addr,
             symbol_string_table: Vec::new(),
             sections: Vec::new(),
@@ -75,17 +75,14 @@ impl<'a> ElfLoader<'a> {
         };
 
         let mut section_addr = target_addr;
-        for (i, s) in loader.elf.section_header_iter().enumerate() {
+        for s in loader.elf.section_header_iter() {
             if s.flags().contains(SectionHeaderFlags::SHF_ALLOC) {
                 let align_mask = (s.addralign() - 1) as u32;
-                eprintln!("align mask for {s:?}: {align_mask:x} {:x}", s.size());
                 section_addr = (section_addr + align_mask) & !align_mask;
                 loader.sections.push(section_addr);
-                eprintln!("{i} {s:?}");
-                eprintln!("load section {} at {section_addr:08x}", i);
                 section_addr += s.size() as u32;
             } else {
-                loader.sections.push(0);
+                loader.sections.push(0xff000000);
             }
 
             if matches!(s.sh_type(), SectionType::SHT_RELA) {
@@ -97,17 +94,17 @@ impl<'a> ElfLoader<'a> {
                         .rela
                         .insert(target_usize, ElfRelaSection { content });
                 }
-            } else if matches!(s.sh_type(), SectionType::SHT_SYMTAB) {
-                if let Some(content) = s.content() {
-                    if !loader.symbols.is_empty() {
-                        todo!();
-                    }
-                    loader.symbols = read_sym_content(content, s.entsize() as usize);
-                    if let Some(strtab_section) = loader.elf.section_header_nth(s.link() as usize) {
-                        if let Some(strtab_content) = strtab_section.content() {
-                            loader.symbol_string_table = strtab_content.to_vec();
-                        }
-                    }
+            } else if let Some(content) = s.content()
+                && matches!(s.sh_type(), SectionType::SHT_SYMTAB)
+            {
+                if !loader.symbols.is_empty() {
+                    todo!();
+                }
+                loader.symbols = read_sym_content(content, s.entsize() as usize);
+                if let Some(strtab_section) = loader.elf.section_header_nth(s.link() as usize)
+                    && let Some(strtab_content) = strtab_section.content()
+                {
+                    loader.symbol_string_table = strtab_content.to_vec();
                 }
             }
         }
@@ -148,7 +145,7 @@ impl<'a> ElfLoader<'a> {
     ) where
         M: TargetMemory,
     {
-        let reloc_at_addr = (sections[in_section] as u32) + r.offset;
+        let reloc_at_addr = sections[in_section] + r.offset;
         let existing_data = memory.read_u32(reloc_at_addr);
 
         // Hack: determine how faerie decides on a relocation type.
@@ -161,23 +158,23 @@ impl<'a> ElfLoader<'a> {
         };
 
         let symbol = &symbols[r.sym()];
-        eprintln!(
-            "R {kind:?} {symbol:?} {in_section} {reloc_at_addr:08x} reloc {r:?} = {existing_data:08x}"
-        );
+        // eprintln!(
+        //     "R {kind:?} {symbol:?} {in_section} {reloc_at_addr:08x} reloc {r:?} = {existing_data:08x}"
+        // );
 
         match kind {
             Some(ElfRelaType::RArmJmp) => {
                 // Straight signed 24.
                 let val_s = (symbol.st_value + sections[symbol.st_shndx as usize]) as i32;
-                eprintln!(
-                    "relocate jmp targeting section at {:x}",
-                    sections[symbol.st_shndx as usize]
-                );
+                // eprintln!(
+                //     "relocate jmp targeting section at {:x}",
+                //     sections[symbol.st_shndx as usize]
+                // );
                 let val_p = (sections[in_section] + r.offset) as i32;
                 let val_a = r.addend;
                 let final_value =
                     (((((val_s - val_p + val_a) - 4) >> 2) & 0xffffff) as u32) | existing_data;
-                eprintln!("S {val_s:08x} P {val_p:08x} A {val_a:08x} => {final_value:08x}");
+                // eprintln!("S {val_s:08x} P {val_p:08x} A {val_a:08x} => {final_value:08x}");
                 memory.write_u32(reloc_at_addr, existing_data | final_value);
             }
             Some(_) => {
@@ -189,7 +186,7 @@ impl<'a> ElfLoader<'a> {
                 } else {
                     val_s + val_a
                 };
-                eprintln!("S {val_s:08x} A {val_a:08x} => {final_value:08x}");
+                // eprintln!("S {val_s:08x} A {val_a:08x} => {final_value:08x}");
                 memory.write_i32(reloc_at_addr, final_value + existing_data as i32);
             }
             _ => todo!(),
@@ -254,12 +251,10 @@ impl<'a> ElfLoader<'a> {
         // Collect relocation sections and set loaded data.
         for (i, s) in self.elf.section_header_iter().enumerate() {
             let section_addr = self.sections[i];
-            if s.flags().contains(SectionHeaderFlags::SHF_ALLOC) {
-                if let Some(content) = s.content() {
-                    memory.write_data(content, section_addr);
-                }
-                eprintln!("{i} {s:?}");
-                eprintln!("load section {} at {section_addr:08x}", i);
+            if s.flags().contains(SectionHeaderFlags::SHF_ALLOC)
+                && let Some(content) = s.content()
+            {
+                memory.write_data(content, section_addr);
             }
         }
 

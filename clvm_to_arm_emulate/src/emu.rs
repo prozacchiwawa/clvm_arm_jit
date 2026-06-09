@@ -136,7 +136,7 @@ impl SingleThreadBase for Emu {
         data: &mut [u8],
     ) -> TargetResult<usize, Self> {
         for (i, d) in data.iter_mut().enumerate() {
-            *d = self.mem.r8(start_addr as u32 + i as u32);
+            *d = self.mem.r8(start_addr + i as u32);
         }
         Ok(data.len())
     }
@@ -198,11 +198,7 @@ impl SwBreakpoint for Emu {
         addr: <Self::Arch as Arch>::Usize,
         _kind: <Self::Arch as Arch>::BreakpointKind,
     ) -> TargetResult<bool, Self> {
-        let found = self
-            .breakpoints
-            .iter()
-            .position(|u| *u == (addr as u32))
-            .clone();
+        let found = self.breakpoints.iter().position(|u| *u == (addr));
         eprintln!("have breakpoint (to delete) {found:?}");
         if let Some(found) = found {
             self.breakpoints.remove(found);
@@ -238,7 +234,7 @@ impl SingleThreadResume for Emu {
         &mut self,
         _sig: std::option::Option<gdbstub::common::Signal>,
     ) -> Result<(), <Self as gdbstub::target::Target>::Error> {
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -259,7 +255,7 @@ pub fn generate_argument_refs(
     match allocator.sexp(sexp) {
         SExp::Pair(_a, b) => {
             let next_index = bi_one() + 2_i32.to_bigint().unwrap() * start.clone();
-            let tail = generate_argument_refs(allocator, next_index, b.clone())?;
+            let tail = generate_argument_refs(allocator, next_index, b)?;
             let new_number = atom_from_number(allocator, &start)?;
             allocator.new_pair(new_number, tail)
         }
@@ -272,9 +268,9 @@ pub fn apply_op(
     head: NodePtr,
     args: NodePtr,
 ) -> Result<NodePtr, EvalErr> {
-    let wrapped_args = allocator.new_pair(allocator.nil(), args.clone())?;
+    let wrapped_args = allocator.new_pair(allocator.nil(), args)?;
     let generated_refs = generate_argument_refs(allocator, 5_i32.to_bigint().unwrap(), args)?;
-    let application = allocator.new_pair(head.clone(), generated_refs)?;
+    let application = allocator.new_pair(head, generated_refs)?;
     Ok(run_program(
         allocator,
         &ChiaDialect::new(0),
@@ -293,10 +289,10 @@ fn is_print_atom(allocator: &Allocator, atom: NodePtr) -> bool {
 }
 
 fn is_print_request(allocator: &Allocator, args: NodePtr) -> Option<NodePtr> {
-    if let SExp::Pair(f, r) = allocator.sexp(args) {
-        if is_print_atom(allocator, f) {
-            return Some(r);
-        }
+    if let SExp::Pair(f, r) = allocator.sexp(args)
+        && is_print_atom(allocator, f)
+    {
+        return Some(r);
     }
 
     None
@@ -304,7 +300,7 @@ fn is_print_request(allocator: &Allocator, args: NodePtr) -> Option<NodePtr> {
 
 fn is_apply(allocator: &Allocator, sexp: NodePtr) -> bool {
     if let SExp::Atom = allocator.sexp(sexp) {
-        return allocator.atom(sexp).to_vec() == &[2];
+        return allocator.atom(sexp).to_vec() == [2];
     }
     false
 }
@@ -319,7 +315,7 @@ fn is_apply_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
 
 fn is_quote(allocator: &Allocator, sexp: NodePtr) -> bool {
     if let SExp::Atom = allocator.sexp(sexp) {
-        return allocator.atom(sexp).to_vec() == &[1];
+        return allocator.atom(sexp).to_vec() == [1];
     }
     false
 }
@@ -333,10 +329,10 @@ fn is_quote_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
 }
 
 fn match_printing(allocator: &Allocator, operator: NodePtr, sexp: NodePtr) -> Option<NodePtr> {
-    if let Some(v) = get_number(allocator, operator) {
-        if v == 34_u32.to_bigint().unwrap() {
-            return is_print_request(allocator, sexp);
-        }
+    if let Some(v) = get_number(allocator, operator)
+        && v == 34_u32.to_bigint().unwrap()
+    {
+        return is_print_request(allocator, sexp);
     }
 
     None
@@ -366,12 +362,11 @@ impl Emu {
         }
 
         let alias_symbol = format!("_$_{hash_hex}");
-        if let Some(alias_info) = self.jit_symbols.get(&alias_symbol) {
-            if let Some(alias_name) = self.get_nul_terminated_string(alias_info.address) {
-                if let Some(lookup) = self.jit_symbols.get(&alias_name) {
-                    return Some(lookup.address);
-                }
-            }
+        if let Some(alias_info) = self.jit_symbols.get(&alias_symbol)
+            && let Some(alias_name) = self.get_nul_terminated_string(alias_info.address)
+            && let Some(lookup) = self.jit_symbols.get(&alias_name)
+        {
+            return Some(lookup.address);
         }
 
         None
@@ -399,7 +394,7 @@ impl Emu {
         cpu.reg_set(Mode::User, reg::CPSR, 0x10); // user mode
 
         Ok(Emu {
-            start_addr: start_addr,
+            start_addr,
 
             custom_reg: 0x12345678,
 
@@ -441,8 +436,8 @@ impl Emu {
         match allocator.sexp(sexp) {
             SExp::Pair(a, b) => {
                 self.mem.write_u32(alloc_ptr, current_addr + 8);
-                let a_res = self.allocate_and_write(allocator, alloc_ptr, a.clone());
-                let b_res = self.allocate_and_write(allocator, alloc_ptr, b.clone());
+                let a_res = self.allocate_and_write(allocator, alloc_ptr, a);
+                let b_res = self.allocate_and_write(allocator, alloc_ptr, b);
                 self.mem.write_u32(current_addr, a_res);
                 self.mem.write_u32(current_addr + 4, b_res);
             }
@@ -466,15 +461,15 @@ impl Emu {
     ) -> Option<Event> {
         let alloc_ptr = self.cpu.reg_get(Mode::User, 5);
         let mut debug = false;
-        if let Some(printing) = match_printing(allocator, operator.clone(), args.clone()) {
+        if let Some(printing) = match_printing(allocator, operator, args) {
             self.pending_gdb_console_output
                 .push(format!("DEBUG: {}", disassemble(allocator, printing)));
             debug = true;
         }
-        match apply_op(allocator, operator.clone(), args.clone()) {
+        match apply_op(allocator, operator, args) {
             Ok(res) => {
                 // Allocate and write back result.
-                let write_result = self.allocate_and_write(allocator, alloc_ptr, res.clone());
+                let write_result = self.allocate_and_write(allocator, alloc_ptr, res);
                 self.cpu.reg_set(Mode::User, 0, write_result);
                 // Increment pc, we handled the operation.
                 let pc = self.cpu.reg_get(Mode::User, reg::PC);
@@ -594,23 +589,24 @@ impl Emu {
             let new_code_address = self.mem.r32(alloc_address);
 
             // Emit code for each argument in reverse order, accumulating into r0.
-            let mut instruction_list = vec![];
-            // Values on the stack:
-            // Pointer to first argument pointer.  Will be fixed up.
-            instruction_list.push(Instr::Long(0));
-            // Constructed value for operator evaluation.
-            instruction_list.push(Instr::Long(0));
-            // Operator sexp.
-            instruction_list.push(Instr::Long(self.mem.r32(r0_value) as usize));
+            let mut instruction_list = vec![
+                // Values on the stack:
+                // Pointer to first argument pointer.  Will be fixed up.
+                Instr::Long(0),
+                // Constructed value for operator evaluation.
+                Instr::Long(0),
+                // Operator sexp.
+                Instr::Long(self.mem.r32(r0_value) as usize),
+                // Push the stack for this.
+                Instr::Push(vec![Register::FP, Register::LR]),
+                Instr::Addi(Register::FP, Register::SP, 4),
+                Instr::Subi(Register::SP, Register::SP, 0x18),
+                Instr::Str(Register::R(4), Register::SP, 0),
+                Instr::Str(Register::R(5), Register::SP, 4),
+                Instr::Str(Register::R(6), Register::SP, 8),
+                Instr::Str(Register::R(7), Register::SP, 12),
+            ];
 
-            // Push the stack for this.
-            instruction_list.push(Instr::Push(vec![Register::FP, Register::LR]));
-            instruction_list.push(Instr::Addi(Register::FP, Register::SP, 4));
-            instruction_list.push(Instr::Subi(Register::SP, Register::SP, 0x18));
-            instruction_list.push(Instr::Str(Register::R(4), Register::SP, 0));
-            instruction_list.push(Instr::Str(Register::R(5), Register::SP, 4));
-            instruction_list.push(Instr::Str(Register::R(6), Register::SP, 8));
-            instruction_list.push(Instr::Str(Register::R(7), Register::SP, 12));
             instruction_list.push(Instr::Subi(
                 Register::R(6),
                 Register::PC,
@@ -708,7 +704,7 @@ impl Emu {
             // Allocate space for this thunk.
             self.mem.write_u32(
                 alloc_address,
-                (new_code_address + instruction_list.len() as u32 * 4) as u32,
+                new_code_address + instruction_list.len() as u32 * 4,
             );
 
             let mut relocations = Vec::new();
@@ -717,10 +713,10 @@ impl Emu {
                 instr.encode(&mut encoded, &mut relocations, "");
                 self.mem.write_u32(
                     new_code_address + (i * 4) as u32,
-                    (encoded[0] as u32
+                    encoded[0] as u32
                         | (encoded[1] as u32) << 8
                         | (encoded[2] as u32) << 16
-                        | (encoded[3] as u32) << 24) as u32,
+                        | (encoded[3] as u32) << 24,
                 );
             }
 
@@ -742,7 +738,7 @@ impl Emu {
             let label = value >> 8;
             let r0_value = self.cpu.reg_get(Mode::User, register as u8);
             let print_arg = self.get_sexp(&mut allocator, r0_value)?;
-            let printed_expr = format!("{}", disassemble(&allocator, print_arg));
+            let printed_expr = disassemble(&allocator, print_arg);
             if label != 0 || register != 0 {
                 self.pending_gdb_console_output
                     .push(format!("CLVM({label:x}): r{register} = {printed_expr}"));

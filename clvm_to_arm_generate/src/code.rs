@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use std::mem::swap;
@@ -28,8 +28,7 @@ use target_lexicon::triple;
 use crate::loader::ElfLoader;
 use crate::mem::write_u32;
 use crate::sexp::{
-    CreateSExp, HasSrcloc, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero, dequote, is_atom,
-    is_wrapped_atom,
+    CreateSExp, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero, dequote, is_atom, is_wrapped_atom,
 };
 use crate::shatree::find_all_by_hash;
 
@@ -325,7 +324,7 @@ impl Encodable for Instr {
     fn encode<'a>(&self, v: &mut Vec<u8>, r: &mut Vec<Relocation>, function: &str) {
         match self {
             Instr::Align4 => {
-                while v.len() % 4 != 0 {
+                while !v.len().is_multiple_of(4) {
                     v.push(0);
                 }
             }
@@ -484,7 +483,7 @@ impl Encodable for Instr {
                         | Rd(rd.clone()).to_u32(),
                 );
                 // Emit a jump to +8
-                vec_from_u32(v, ArmCond::Unconditional.to_u32() | 5 << 25 | 0);
+                vec_from_u32(v, ArmCond::Unconditional.to_u32() | 5 << 25);
                 r.push(Relocation {
                     function: function.to_string(),
                     code_location: v.len(),
@@ -595,6 +594,13 @@ impl fmt::Display for Instr {
     }
 }
 
+#[derive(Clone)]
+struct DwarfLineRow {
+    filename: String,
+    line: u64,
+    col: u64,
+}
+
 struct DwarfBuilder {
     unit_id: UnitId,
     file_to_id: HashMap<Vec<u8>, (DirectoryId, FileId)>,
@@ -614,7 +620,7 @@ struct DwarfBuilder {
     dwarf: Dwarf,
     frame_table: FrameTable,
     cfi_cie_id: Option<CieId>,
-    last_row_source: Option<(String, u64, u64)>,
+    last_row_source: Option<DwarfLineRow>,
     last_statement_source_line: Option<(String, u64)>,
 }
 
@@ -633,7 +639,7 @@ impl gimli::write::Writer for DwarfSectionWriter {
     type Endian = gimli::LittleEndian;
 
     fn endian(&self) -> Self::Endian {
-        return gimli::LittleEndian::default();
+        gimli::LittleEndian
     }
 
     fn len(&self) -> usize {
@@ -710,7 +716,7 @@ impl DwarfBuilder {
         let dirstring = LineString::String(dirname.clone());
         let filestring = LineString::String(filename.clone());
         let mut line_program = LineProgram::new(
-            encoding.clone(),
+            encoding,
             line_encoding,
             dirstring.clone(),
             filestring.clone(),
@@ -718,9 +724,9 @@ impl DwarfBuilder {
         );
         let mut directory_to_id = HashMap::new();
         let directory_id = line_program.add_directory(dirstring);
-        directory_to_id.insert(dirname.clone(), directory_id.clone());
+        directory_to_id.insert(dirname.clone(), directory_id);
         let mut file_to_id = HashMap::new();
-        let file_id = line_program.add_file(filestring, directory_id.clone(), None);
+        let file_id = line_program.add_file(filestring, directory_id, None);
         file_to_id.insert(filename.clone(), (directory_id, file_id));
 
         let mut unit = Unit::new(encoding, line_program);
@@ -734,7 +740,7 @@ impl DwarfBuilder {
         let unit_ent = unit.get_mut(unit.root());
         unit_ent.set(
             DW_AT_low_pc,
-            AttributeValue::Address(Address::Constant(target_addr as u64)),
+            AttributeValue::Address(Address::Constant((target_addr) as u64)),
         );
         unit_ent.set(DW_AT_name, AttributeValue::String(filename.clone()));
         unit_ent.set(DW_AT_language, AttributeValue::Language(DW_LANG_C99));
@@ -794,9 +800,8 @@ impl DwarfBuilder {
     ) -> (DirectoryId, FileId) {
         let unit = self.dwarf.units.get_mut(self.unit_id);
         let filestring = LineString::String(filename.to_vec());
-        let fileid = unit.line_program.add_file(filestring, dirid.clone(), None);
-        self.file_to_id
-            .insert(filename.to_vec(), (dirid.clone(), fileid.clone()));
+        let fileid = unit.line_program.add_file(filestring, dirid, None);
+        self.file_to_id.insert(filename.to_vec(), (dirid, fileid));
         (dirid, fileid)
     }
 
@@ -829,14 +834,11 @@ impl DwarfBuilder {
         let dirstring = LineString::String(use_dirname.clone());
         let unit = self.dwarf.units.get_mut(self.unit_id);
         let dirid = unit.line_program.add_directory(dirstring);
-        self.directory_to_id.insert(use_dirname, dirid.clone());
+        self.directory_to_id.insert(use_dirname, dirid);
         self.add_file_having_dirid(dirid, &filename)
     }
 
-    fn synthetic_expr_key<T: SExp + HasSrcloc>(
-        loc: &T::Srcloc,
-        source_sexp: &impl fmt::Display,
-    ) -> Vec<u8> {
+    fn synthetic_expr_key<C: CreateSExp>(loc: &C::SL, source_sexp: &impl fmt::Display) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(loc.filename().as_bytes());
         hasher.update((loc.line() as u64).to_le_bytes());
@@ -849,12 +851,12 @@ impl DwarfBuilder {
         hasher.finalize().to_vec()
     }
 
-    fn add_synthetic_line<T: SExp + HasSrcloc>(
+    fn add_synthetic_line<C: CreateSExp>(
         &mut self,
-        loc: &T::Srcloc,
+        loc: &C::SL,
         source_sexp: &impl fmt::Display,
     ) -> u64 {
-        let synthetic_key = Self::synthetic_expr_key::<T>(loc, source_sexp);
+        let synthetic_key = Self::synthetic_expr_key::<C>(loc, source_sexp);
         if let Some(line) = self.synthetic_expr_line_by_key.get(&synthetic_key) {
             return *line;
         }
@@ -882,10 +884,10 @@ impl DwarfBuilder {
         synthetic_source
     }
 
-    fn add_instr<T: SExp + HasSrcloc>(
+    fn add_instr<C: CreateSExp>(
         &mut self,
         addr: usize,
-        loc: &T::Srcloc,
+        loc: &C::SL,
         source_sexp: &impl fmt::Display,
         instr: Instr,
         begin_end_block: Option<BeginEndBlock>,
@@ -899,28 +901,42 @@ impl DwarfBuilder {
         {
             return;
         }
+
         let source_file = loc.filename();
-        let source_key = (source_file.clone(), loc.line() as u64, loc.col() as u64);
-        let source_line_key = (source_file, loc.line() as u64);
         let synthetic_file_id = self
             .synthetic_file_id
             .expect("synthetic source file registered");
-        let mut using_synthetic_file = loc.filename().starts_with('*');
-        let (mut file_id, mut line, mut col) = if using_synthetic_file {
+        let using_synthetic_file = loc.filename().starts_with('*');
+        let (file_id, line, col) = if using_synthetic_file {
             (
                 synthetic_file_id,
-                self.add_synthetic_line::<T>(loc, source_sexp),
+                self.add_synthetic_line::<C>(loc, source_sexp),
                 1_u64,
             )
         } else {
             let (_, file_id) = self.add_file(&loc.filename());
             (file_id, loc.line() as u64, loc.col() as u64)
         };
-        let source_changed = self
-            .last_row_source
-            .as_ref()
-            .map(|prev| prev != &source_key)
-            .unwrap_or(true);
+
+        // Figure out whether the source changed.
+        let source_changed = if let Some(last) = self.last_row_source.as_ref() {
+            source_file != last.filename || line != last.line || col != last.col
+        } else {
+            true
+        };
+
+        let new_last_row = if let Some(last_row) = &self.last_row_source
+            && !source_changed
+        {
+            last_row.clone()
+        } else {
+            DwarfLineRow {
+                filename: source_file.clone(),
+                line,
+                col,
+            }
+        };
+
         let control_flow_or_dispatch = matches!(
             instr,
             Instr::B(_)
@@ -930,43 +946,25 @@ impl DwarfBuilder {
                 | Instr::Swi(_)
                 | Instr::SwiEq(_)
         );
+
         let is_statement = addr == self.seq_addr_start
-            || begin_end_block == Some(BeginEndBlock::BeginBlock)
+            || begin_end_block.is_some()
             || source_changed
             || control_flow_or_dispatch;
-        if is_statement && !using_synthetic_file {
-            let same_statement_source_line = self
-                .last_statement_source_line
-                .as_ref()
-                .map(|prev| prev == &source_line_key)
-                .unwrap_or(false);
-            // Keep the first statement point on a real source line, and map
-            // repeated statement boundaries on that line to the synthetic file.
-            if same_statement_source_line {
-                file_id = synthetic_file_id;
-                line = self.add_synthetic_line::<T>(loc, source_sexp);
-                col = 1;
-                using_synthetic_file = true;
-            }
+
+        if is_statement || control_flow_or_dispatch || source_changed {
+            let unit = self.dwarf.units.get_mut(self.unit_id);
+            let row = unit.line_program.row();
+            row.address_offset = (addr - self.seq_addr_start) as u64;
+            row.file = file_id;
+            row.line = line;
+            row.column = col;
+            row.is_statement = is_statement;
+            row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
+            unit.line_program.generate_row();
+
+            self.last_row_source = Some(new_last_row);
         }
-        let unit = self.dwarf.units.get_mut(self.unit_id);
-        let row = unit.line_program.row();
-        row.address_offset = (addr - self.seq_addr_start) as u64;
-        row.file = file_id;
-        row.line = line;
-        row.column = col;
-        row.is_statement = is_statement;
-        row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
-        let emitted_statement = row.is_statement;
-        unit.line_program.generate_row();
-        if emitted_statement {
-            if using_synthetic_file {
-                self.last_statement_source_line = None;
-            } else {
-                self.last_statement_source_line = Some(source_line_key);
-            }
-        }
-        self.last_row_source = Some(source_key);
     }
 
     fn start(&mut self, addr: usize) {
@@ -1048,18 +1046,30 @@ impl DwarfBuilder {
         None
     }
 
-    fn add_arguments<T: SExp>(
+    fn add_arguments<C: CreateSExp>(
         &mut self,
         subprogram_id: UnitEntryId,
         locations: &[VariableLocationInfo],
         here: Number,
         path: Number,
-        args: T,
+        args: C::S,
     ) {
         match args.explode() {
             SExpValue::Cons(a, b) => {
-                self.add_arguments(subprogram_id, locations, here.clone() << 1, path.clone(), a);
-                self.add_arguments(subprogram_id, locations, here.clone() << 1, path | here, b);
+                self.add_arguments::<C>(
+                    subprogram_id,
+                    locations,
+                    here.clone() << 1,
+                    path.clone(),
+                    a,
+                );
+                self.add_arguments::<C>(
+                    subprogram_id,
+                    locations,
+                    here.clone() << 1,
+                    path | here,
+                    b,
+                );
             }
             SExpValue::Atom(a) => {
                 let argname = &String::from_utf8_lossy(&a).to_string();
@@ -1112,8 +1122,9 @@ impl DwarfBuilder {
     }
 
     // Create dwarf traffic needed to ensure that gdb can find the locals.
-    fn decorate_function<T: SExp + HasSrcloc, C: CreateSExp<T>>(
+    fn decorate_function<C: CreateSExp>(
         &mut self,
+        creator: &mut C,
         label: &str,
         addr: usize,
         size: usize,
@@ -1150,7 +1161,7 @@ impl DwarfBuilder {
             .expect("CFI CIE should be initialized for unwind info");
         self.frame_table.add_fde(cfi_cie_id, fde);
 
-        let matched_signature = self.match_function(&label);
+        let matched_signature = self.match_function(label);
         let name = preferred_name
             .map(str::to_string)
             .or_else(|| matched_signature.as_ref().map(|(name, _)| name.clone()))
@@ -1163,12 +1174,7 @@ impl DwarfBuilder {
         // We'll make 3 subprograms to represent where the current arguments can be arrived
         // at from, then decorate all of them with the argument retriever below.
 
-        let mut subprogram_names = vec![name.clone()];
-        if name != label {
-            // Keep a typed DIE for both the colloquial and emitted symbol names so
-            // either one resolves to the same pointer return type in debuggers.
-            subprogram_names.push(label.to_string());
-        }
+        let subprogram_names = [name.clone()];
         let subprogram_ids = {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let mut subprogram_ids = Vec::with_capacity(subprogram_names.len());
@@ -1178,12 +1184,11 @@ impl DwarfBuilder {
                 // Frame pointer for the function.
                 let mut fbexpr_mid = Expression::new();
                 fbexpr_mid.op_breg(gimli::Register(13), 0);
-                let mut loclist = Vec::new();
-                loclist.push(Location::StartEnd {
+                let loclist = vec![Location::StartEnd {
                     begin: Address::Constant(addr as u64),
                     end: Address::Constant((addr + size) as u64),
                     data: fbexpr_mid,
-                });
+                }];
                 let loc_list_id = unit.locations.add(LocationList(loclist));
                 let sub_ent = unit.get_mut(subprogram_id);
                 sub_ent.set(
@@ -1211,8 +1216,8 @@ impl DwarfBuilder {
             }
             subprogram_ids
         };
-        let srcloc = T::Srcloc::start("*args*");
-        if let Ok(parsed) = C::parse_sexp::<_>(srcloc.clone(), args.bytes()) {
+        let srcloc = creator.start_srcloc("*args*");
+        if let Ok(parsed) = creator.parse_sexp(srcloc, args.bytes()) {
             let self_u32_type = self.u32_type;
             let early_reg_closure = move || {
                 let mut early_reg_expr = Expression::new();
@@ -1245,7 +1250,7 @@ impl DwarfBuilder {
             ];
             if !parsed.is_empty() {
                 for subprogram_id in subprogram_ids.iter().copied() {
-                    self.add_arguments(
+                    self.add_arguments::<C>(
                         subprogram_id,
                         &locations,
                         bi_one(),
@@ -1298,7 +1303,7 @@ impl DwarfBuilder {
         self.write_section(".debug_frame", &sections.debug_frame, instrs);
         self.write_section(".eh_frame", &sections.eh_frame, instrs);
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -1316,7 +1321,7 @@ impl Constant {
     }
 }
 
-pub struct Program<T: SExp> {
+pub struct Program<C: CreateSExp> {
     target_addr: u32,
     finished_insns: Vec<Instr>,
     first_label: String,
@@ -1324,7 +1329,7 @@ pub struct Program<T: SExp> {
     encounters_of_code: HashMap<Vec<u8>, usize>,
     labels_by_hash: HashMap<Vec<u8>, String>,
     code_to_hash: HashMap<String, String>,
-    waiting_programs: Vec<(String, T)>,
+    waiting_programs: Vec<(String, C::S)>,
     constants: HashMap<Vec<u8>, Constant>,
     symbol_table: Rc<HashMap<String, String>>,
     current_symbol: Option<String>,
@@ -1336,11 +1341,11 @@ pub struct Program<T: SExp> {
     dwarf_builder: DwarfBuilder,
 }
 
-impl<T: SExp> fmt::Display for Program<T> {
+impl<C: CreateSExp> fmt::Display for Program<C> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let write_vec = |f: &mut Formatter, v: &[Instr]| -> fmt::Result {
             for i in v.iter() {
-                write!(f, "{i}\n")?;
+                writeln!(f, "{i}")?;
             }
             Ok(())
         };
@@ -1465,7 +1470,7 @@ pub fn swi_print(register: usize, label: usize) -> usize {
     SWI_PRINT_EXPR | register << 4 | label << 8
 }
 
-impl<T: SExp + HasSrcloc> Program<T> {
+impl<C: CreateSExp> Program<C> {
     fn get_renamed_function_label(&self, hash: &[u8]) -> Option<String> {
         let hash_string = hex::encode(hash);
         self.renamed_symbols.get(&hash_string).cloned()
@@ -1483,23 +1488,28 @@ impl<T: SExp + HasSrcloc> Program<T> {
     }
 
     fn get_code_label(&mut self, hash: &[u8]) -> String {
-        let n = if let Some(n) = self.encounters_of_code.get(hash).clone() {
+        let n = if let Some(n) = self.encounters_of_code.get(hash) {
             *n
         } else {
             0
         };
 
         self.encounters_of_code.insert(hash.to_vec(), n + 1);
-        return format!("_{}_{n}", hexify(hash));
+        format!("_{}_{n}", hexify(hash))
     }
 
-    fn do_throw<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8]) {
-        self.load_atom::<C>(source_sexp.clone(), loc, hash, hash);
-        self.push::<C>(source_sexp.clone(), loc, Instr::Swi(SWI_PRINT_EXPR));
-        self.push::<C>(source_sexp, loc, Instr::Swi(SWI_THROW));
+    fn do_throw(&mut self, creator: &mut C, source_sexp: C::S, loc: &C::SL, hash: &[u8]) {
+        self.load_atom(creator, source_sexp.clone(), loc, hash, hash);
+        self.push(
+            creator,
+            source_sexp.clone(),
+            loc,
+            Instr::Swi(SWI_PRINT_EXPR),
+        );
+        self.push(creator, source_sexp, loc, Instr::Swi(SWI_THROW));
     }
 
-    fn add_sexp(&mut self, loc: &T::Srcloc, hash: &[u8], s: T) -> String {
+    fn add_sexp(&mut self, hash: &[u8], s: C::S) -> String {
         if let Some(lbl) = self.constants.get(hash) {
             return lbl.label();
         }
@@ -1508,8 +1518,8 @@ impl<T: SExp + HasSrcloc> Program<T> {
             SExpValue::Cons(a, b) => {
                 let a_hash = a.sha256tree();
                 let b_hash = b.sha256tree();
-                let a_label = self.add_sexp(loc, &a_hash, a);
-                let b_label = self.add_sexp(loc, &b_hash, b);
+                let a_label = self.add_sexp(&a_hash, a);
+                let b_label = self.add_sexp(&b_hash, b);
                 let label = format!("_{}", hexify(hash));
                 self.constants.insert(
                     hash.to_vec(),
@@ -1519,27 +1529,28 @@ impl<T: SExp + HasSrcloc> Program<T> {
             }
             _ => self.add_atom(
                 hash,
-                &s.atom_bytes::<T>()
+                &s.atom_bytes::<C::S>()
                     .expect("non-cons debug sexp should atomize"),
             ),
         }
     }
 
-    fn load_sexp<C: CreateSExp<T>>(&mut self, source_sexp: T, loc: &T::Srcloc, hash: &[u8], s: T) {
-        let label = self.add_sexp(loc, hash, s);
-        self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
+    fn load_sexp(&mut self, creator: &mut C, source_sexp: C::S, loc: &C::SL, hash: &[u8], s: C::S) {
+        let label = self.add_sexp(hash, s);
+        self.push(creator, source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn first_rest<C: CreateSExp<T>>(
+    fn first_rest(
         &mut self,
-        source_sexp: T,
-        loc: &T::Srcloc,
+        creator: &mut C,
+        source_sexp: C::S,
+        loc: &C::SL,
         hash: &[u8],
-        lst: &[T],
+        lst: &[C::S],
         offset: i32,
     ) {
         if lst.len() != 1 {
-            return self.do_throw::<C>(source_sexp, loc, hash);
+            return self.do_throw(creator, source_sexp, loc, hash);
         }
 
         let subexp = self.add(lst[0].clone());
@@ -1555,45 +1566,47 @@ impl<T: SExp + HasSrcloc> Program<T> {
             Instr::SwiEq(SWI_THROW),
             Instr::Ldr(Register::R(0), Register::R(0), offset),
         ] {
-            self.push::<C>(source_sexp.clone(), loc, i.clone());
+            self.push(creator, source_sexp.clone(), loc, i.clone());
         }
     }
 
-    fn do_operator<C: CreateSExp<T>>(
+    #[allow(clippy::too_many_arguments)]
+    fn do_operator(
         &mut self,
-        loc: &T::Srcloc,
+        creator: &mut C,
+        loc: &C::SL,
         hash: &[u8],
         a: &[u8],
-        b: T,
+        b: C::S,
         treat_as_quoted: bool,
-        source_sexp: T,
+        source_sexp: C::S,
     ) {
         if treat_as_quoted {
             todo!();
         }
 
         if a == b"" {
-            return self.do_throw::<C>(source_sexp, loc, hash);
+            return self.do_throw(creator, source_sexp, loc, hash);
         }
 
         // Quote is special.
-        if a == &[1] {
+        if a == [1] {
             self.add(b.clone());
             let b_hash = b.sha256tree();
-            return self.load_sexp::<C>(source_sexp, loc, &b_hash, b);
+            return self.load_sexp(creator, source_sexp, loc, &b_hash, b);
         }
 
         // Every other operator must have a proper list following it.
         let lst = if let Some(lst) = b.proper_list() {
             lst
         } else {
-            return self.do_throw::<C>(source_sexp, loc, hash);
+            return self.do_throw(creator, source_sexp, loc, hash);
         };
 
-        if a == &[2] {
+        if a == [2] {
             // Apply operator
             if lst.len() != 2 {
-                return self.do_throw::<C>(source_sexp, loc, hash);
+                return self.do_throw(creator, source_sexp, loc, hash);
             }
 
             let env_comp = self.add(lst[1].clone());
@@ -1602,7 +1615,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 Instr::Bl(env_comp),
                 Instr::Addi(Register::R(4), Register::R(0), 0),
             ] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
+                self.push(creator, source_sexp.clone(), loc, i.clone());
             }
 
             if let Some(quoted_code) = dequote(lst[0].clone()) {
@@ -1614,7 +1627,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                     Instr::Addi(Register::R(0), Register::R(7), 0),
                     Instr::Bl(quoted_code.to_string()),
                 ] {
-                    self.push::<C>(source_sexp.clone(), loc, i.clone());
+                    self.push(creator, source_sexp.clone(), loc, i.clone());
                 }
             } else {
                 let code_comp = self.add(lst[0].clone());
@@ -1626,21 +1639,20 @@ impl<T: SExp + HasSrcloc> Program<T> {
                     Instr::Swi(SWI_DISPATCH_NEW_CODE),
                     Instr::Bx(Register::R(1)),
                 ] {
-                    self.push::<C>(source_sexp.clone(), loc, i.clone());
+                    self.push(creator, source_sexp.clone(), loc, i.clone());
                 }
             }
 
-            for i in &[
-                // Reload the old env.
+            self.push(
+                creator,
+                source_sexp.clone(),
+                loc,
                 Instr::Ldr(Register::R(7), Register::SP, 12),
-            ] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
-            }
-            return;
-        } else if a == &[3] {
+            );
+        } else if a == [3] {
             // If operator
             if lst.len() != 3 {
-                return self.do_throw::<C>(source_sexp, loc, hash);
+                return self.do_throw(creator, source_sexp, loc, hash);
             }
 
             let else_clause = self.add(lst[2].clone());
@@ -1663,13 +1675,12 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 Instr::AddiEq(Register::R(4), Register::R(6), 0),
                 Instr::Addi(Register::R(0), Register::R(4), 0),
             ] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
+                self.push(creator, source_sexp.clone(), loc, i.clone());
             }
-            return;
-        } else if a == &[4] {
+        } else if a == [4] {
             // Cons operator
             if lst.len() != 2 {
-                return self.do_throw::<C>(source_sexp, loc, hash);
+                return self.do_throw(creator, source_sexp, loc, hash);
             }
 
             let rest_label = self.add(lst[1].clone());
@@ -1692,23 +1703,25 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 // Move the result to r0
                 Instr::Addi(Register::R(0), Register::R(1), 0),
             ] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
+                self.push(creator, source_sexp.clone(), loc, i.clone());
             }
-            return;
-        } else if a == &[5] {
-            return self.first_rest::<C>(source_sexp, loc, hash, &lst, 0);
-        } else if a == &[6] {
-            return self.first_rest::<C>(source_sexp, loc, hash, &lst, 4);
+        } else if a == [5] {
+            self.first_rest(creator, source_sexp, loc, hash, &lst, 0)
+        } else if a == [6] {
+            self.first_rest(creator, source_sexp, loc, hash, &lst, 4)
         } else {
             // Ensure we have this sexp loadable as data.
-            let operator_sexp = C::atom(loc.clone(), a);
+            let operator_sexp = creator.atom(loc.clone(), a);
             let atom_hash = operator_sexp.sha256tree();
             let label = self.add_atom(&atom_hash, a);
 
             // Load a nil into R4.
-            for i in &[Instr::Andi(Register::R(4), Register::R(4), 0)] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
-            }
+            self.push(
+                creator,
+                source_sexp.clone(),
+                loc,
+                Instr::Andi(Register::R(4), Register::R(4), 0),
+            );
 
             // For each subexpression, call it and replace R4 with (cons R0 R4)
             for item in lst.iter().rev() {
@@ -1733,7 +1746,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                     // Replace R4 with R6 (the new cons)
                     Instr::Addi(Register::R(4), Register::R(6), 0),
                 ] {
-                    self.push::<C>(source_sexp.clone(), loc, i.clone());
+                    self.push(creator, source_sexp.clone(), loc, i.clone());
                 }
             }
 
@@ -1745,33 +1758,35 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 // Call to do the operator.
                 Instr::Swi(SWI_DISPATCH_INSTRUCTION),
             ] {
-                self.push::<C>(source_sexp.clone(), loc, i.clone());
+                self.push(creator, source_sexp.clone(), loc, i.clone());
             }
         }
     }
 
     // R0 = the address of the env block.
-    fn env_select<C: CreateSExp<T>>(
+    fn env_select(
         &mut self,
-        source_sexp: T,
-        loc: &T::Srcloc,
+        creator: &mut C,
+        source_sexp: C::S,
+        loc: &C::SL,
         hash: &[u8],
         v: &[u8],
     ) {
         if v.is_empty() {
-            self.load_atom::<C>(source_sexp, loc, hash, v);
+            self.load_atom(creator, source_sexp, loc, hash, v);
             return;
         }
 
         // Let r0 be our pointer.
-        self.push::<C>(
+        self.push(
+            creator,
             source_sexp.clone(),
             loc,
             Instr::Addi(Register::R(0), Register::R(7), 0),
         );
 
         // Whole env ref.
-        if v == &[1] {
+        if v == [1] {
             return;
         }
 
@@ -1796,7 +1811,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         // Load if it was a cons.
                         Instr::Ldr(Register::R(0), Register::R(0), offset),
                     ] {
-                        self.push::<C>(source_sexp.clone(), loc, i.clone());
+                        self.push(creator, source_sexp.clone(), loc, i.clone());
                     }
                 }
             }
@@ -1814,18 +1829,19 @@ impl<T: SExp + HasSrcloc> Program<T> {
         label
     }
 
-    fn load_atom<C: CreateSExp<T>>(
+    fn load_atom(
         &mut self,
-        source_sexp: T,
-        loc: &T::Srcloc,
+        creator: &mut C,
+        source_sexp: C::S,
+        loc: &C::SL,
         hash: &[u8],
         v: &[u8],
     ) {
         let label = self.add_atom(hash, v);
-        self.push::<C>(source_sexp, loc, Instr::Lea(Register::R(0), label));
+        self.push(creator, source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn add(&mut self, sexp: T) -> String {
+    fn add(&mut self, sexp: C::S) -> String {
         let hash = sexp.sha256tree();
         if let Some(existing_label) = self.labels_by_hash.get(&hash) {
             return existing_label.clone();
@@ -1846,15 +1862,15 @@ impl<T: SExp + HasSrcloc> Program<T> {
         body_label
     }
 
-    fn push_be<C: CreateSExp<T>>(
+    fn push_be(
         &mut self,
-        source_sexp: T,
-        srcloc: &T::Srcloc,
+        creator: &mut C,
+        source_sexp: C::S,
+        srcloc: &C::SL,
         instr: Instr,
         begin_end_block: Option<BeginEndBlock>,
     ) {
         let size = instr.size(self.current_addr);
-
         let insert_instr = if let Instr::Globl(g) = &instr {
             // Two things: ensure we switch to real function names when we
             // have them.
@@ -1881,7 +1897,8 @@ impl<T: SExp + HasSrcloc> Program<T> {
             self.current_addr = (self.current_addr + 15) & !15;
             if let Some(label) = self.current_symbol.as_ref() {
                 let preferred_name = self.current_symbol_name.clone();
-                if let Some(function_name) = self.dwarf_builder.decorate_function::<T, C>(
+                if let Some(function_name) = self.dwarf_builder.decorate_function::<C>(
+                    creator,
                     label,
                     self.start_addr,
                     self.current_addr - self.start_addr,
@@ -1896,7 +1913,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
         if size != 0 {
             let next_addr = self.current_addr + size;
-            self.dwarf_builder.add_instr::<T>(
+            self.dwarf_builder.add_instr::<C>(
                 self.current_addr,
                 srcloc,
                 &source_sexp,
@@ -1907,22 +1924,33 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn push<C: CreateSExp<T>>(&mut self, source_sexp: T, srcloc: &T::Srcloc, instr: Instr) {
-        self.push_be::<C>(source_sexp, srcloc, instr, None);
+    fn push(&mut self, creator: &mut C, source_sexp: C::S, srcloc: &C::SL, instr: Instr) {
+        self.push_be(creator, source_sexp, srcloc, instr, None);
     }
 
-    fn emit_waiting<C: CreateSExp<T>>(&mut self) {
+    fn emit_waiting(&mut self, creator: &mut C) {
         while let Some((label, sexp)) = self.waiting_programs.pop() {
             let hash = sexp.sha256tree();
 
             self.labels_by_hash.insert(hash.clone(), label.clone());
             self.dwarf_builder.start(self.current_addr);
 
-            self.push::<C>(sexp.clone(), &sexp.loc(), Instr::Globl(label.clone()));
-            self.push::<C>(sexp.clone(), &sexp.loc(), Instr::Label(label.clone()));
-            self.push_be::<C>(
+            self.push(
+                creator,
                 sexp.clone(),
-                &sexp.loc(),
+                &creator.loc(sexp.clone()),
+                Instr::Globl(label.clone()),
+            );
+            self.push(
+                creator,
+                sexp.clone(),
+                &creator.loc(sexp.clone()),
+                Instr::Label(label.clone()),
+            );
+            self.push_be(
+                creator,
+                sexp.clone(),
+                &creator.loc(sexp.clone()),
                 Instr::Push(vec![Register::FP, Register::LR]),
                 Some(BeginEndBlock::BeginBlock),
             );
@@ -1939,7 +1967,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 // other code generation for the purpose of breakpoints.
                 Instr::Addi(Register::R(0), Register::R(0), 0),
             ] {
-                self.push::<C>(sexp.clone(), &sexp.loc(), i.clone());
+                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
             }
 
             // Translate body.
@@ -1947,8 +1975,9 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 SExpValue::Cons(a, b) => {
                     if let Some(atom) = is_atom(a.clone()) {
                         // do quoted operator
-                        self.do_operator::<C>(
-                            &a.loc(),
+                        self.do_operator(
+                            creator,
+                            &creator.loc(a.clone()),
                             &hash,
                             &atom,
                             b.clone(),
@@ -1957,8 +1986,9 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         );
                     } else if let Some((a_val, a)) = is_wrapped_atom(a.clone()) {
                         // do unquoted operator
-                        self.do_operator::<C>(
-                            &a_val.loc(),
+                        self.do_operator(
+                            creator,
+                            &creator.loc(a_val.clone()),
                             &hash,
                             &a,
                             b.clone(),
@@ -1967,15 +1997,27 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         );
                     } else {
                         // invalid head form, just throw.
-                        self.do_throw::<C>(sexp.clone(), &sexp.loc(), &hash);
+                        self.do_throw(creator, sexp.clone(), &creator.loc(sexp.clone()), &hash);
                     }
                 }
-                SExpValue::Nil => self.load_atom::<C>(sexp.clone(), &sexp.loc(), &hash, &[]),
+                SExpValue::Nil => self.load_atom(
+                    creator,
+                    sexp.clone(),
+                    &creator.loc(sexp.clone()),
+                    &hash,
+                    &[],
+                ),
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
-                        return self.load_atom::<C>(sexp.clone(), &sexp.loc(), &hash, &[]);
+                        return self.load_atom(
+                            creator,
+                            sexp.clone(),
+                            &creator.loc(sexp.clone()),
+                            &hash,
+                            &[],
+                        );
                     }
-                    self.env_select::<C>(sexp.clone(), &sexp.loc(), &hash, &v);
+                    self.env_select(creator, sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
                 }
             }
 
@@ -1987,12 +2029,13 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 Instr::Subi(Register::SP, Register::FP, 4),
                 Instr::Pop(vec![Register::FP, Register::LR]),
             ] {
-                self.push::<C>(sexp.clone(), &sexp.loc(), i.clone());
+                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
             }
 
-            self.push_be::<C>(
+            self.push_be(
+                creator,
                 sexp.clone(),
-                &sexp.loc(),
+                &creator.loc(sexp.clone()),
                 Instr::Bx(Register::LR),
                 Some(BeginEndBlock::EndBlock),
             );
@@ -2000,29 +2043,79 @@ impl<T: SExp + HasSrcloc> Program<T> {
         }
     }
 
-    fn start_insns<C: CreateSExp<T>>(&mut self) {
-        let srcloc = T::Srcloc::start("*prolog*");
-        let source_sexp = C::atom(srcloc.clone(), b"prolog");
+    fn start_insns(&mut self, creator: &mut C) {
+        let srcloc = C::SL::start("*prolog*");
+        let source_sexp = creator.atom(srcloc.clone(), b"prolog");
         for i in &[
-            Instr::Section(".text".to_string()),
             Instr::Align4,
             Instr::Globl("_start".to_string()),
             Instr::Label("_start".to_string()),
+        ] {
+            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+        }
+
+        self.push_be(
+            creator,
+            source_sexp.clone(),
+            &srcloc,
+            Instr::Push(vec![Register::FP, Register::LR]),
+            Some(BeginEndBlock::BeginBlock),
+        );
+        for i in &[
+            Instr::Addi(Register::FP, Register::SP, 4),
+            Instr::Subi(Register::SP, Register::SP, 0x18),
+            Instr::Str(Register::R(4), Register::SP, 0),
+            Instr::Str(Register::R(5), Register::SP, 4),
+            Instr::Str(Register::R(6), Register::SP, 8),
+            Instr::Str(Register::R(7), Register::SP, 12),
+            // Load the env into r0 and the global data addr into r5.
             Instr::Lea(Register::R(5), "_run".to_string()),
             Instr::Ldr(Register::R(7), Register::R(5), 4),
             Instr::Addi(Register::R(0), Register::R(7), 0),
+            // Call the program.
             Instr::Bl(self.first_label.clone()),
             // Print the last value.
             Instr::Swi(SWI_PRINT_EXPR),
             Instr::Swi(SWI_DONE),
         ] {
-            self.push::<C>(source_sexp.clone(), &srcloc, i.clone());
+            self.push(
+                creator,
+                source_sexp.clone(),
+                &creator.loc(source_sexp.clone()),
+                i.clone(),
+            );
         }
+
+        // Epilogue doesn't really matter since we did SWI_DONE, but it has symmetry
+        // with other functions in the program.
+        for i in &[
+            Instr::Ldr(Register::R(4), Register::SP, 0),
+            Instr::Ldr(Register::R(5), Register::SP, 4),
+            Instr::Ldr(Register::R(6), Register::SP, 8),
+            Instr::Ldr(Register::R(7), Register::SP, 12),
+            Instr::Subi(Register::SP, Register::FP, 4),
+            Instr::Pop(vec![Register::FP, Register::LR]),
+        ] {
+            self.push(
+                creator,
+                source_sexp.clone(),
+                &creator.loc(source_sexp.clone()),
+                i.clone(),
+            );
+        }
+
+        self.push_be(
+            creator,
+            source_sexp.clone(),
+            &creator.loc(source_sexp.clone()),
+            Instr::Bx(Register::LR),
+            Some(BeginEndBlock::EndBlock),
+        );
     }
 
-    fn finish_insns<C: CreateSExp<T>>(&mut self) -> Result<(), String> {
-        let srcloc = T::Srcloc::start("*epilog*");
-        let source_sexp = C::atom(srcloc.clone(), b"epilog");
+    fn finish_insns(&mut self, creator: &mut C) -> Result<(), String> {
+        let srcloc = C::SL::start("*epilog*");
+        let source_sexp = creator.atom(srcloc.clone(), b"epilog");
         let mut constants = HashMap::new();
         swap(&mut constants, &mut self.constants);
 
@@ -2038,7 +2131,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
         ]
         .iter()
         {
-            self.push::<C>(source_sexp.clone(), &srcloc, i.clone());
+            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
         }
 
         for (_, c) in constants.iter() {
@@ -2051,7 +2144,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         Instr::Addr(a_label.clone(), false),
                         Instr::Addr(b_label.clone(), false),
                     ] {
-                        self.push::<C>(source_sexp.clone(), &srcloc, i.clone());
+                        self.push(creator, source_sexp.clone(), &srcloc, i.clone());
                     }
                 }
                 Constant::Atom(label, bytes) => {
@@ -2062,7 +2155,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         Instr::Long(bytes.len() * 2 + 1),
                         Instr::Bytes(bytes.clone()),
                     ] {
-                        self.push::<C>(source_sexp.clone(), &srcloc, i.clone());
+                        self.push(creator, source_sexp.clone(), &srcloc, i.clone());
                     }
                 }
             }
@@ -2087,7 +2180,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 Instr::Label(remap_label),
                 Instr::Bytes(target_name_bytes.clone()),
             ] {
-                self.push::<C>(source_sexp.clone(), &srcloc, i.clone());
+                self.push(creator, source_sexp.clone(), &srcloc, i.clone());
             }
         }
 
@@ -2096,6 +2189,37 @@ impl<T: SExp + HasSrcloc> Program<T> {
             .unwrap();
 
         Ok(())
+    }
+
+    fn mutate_insn_with_functions(&self, defined: &HashMap<String, String>, i: &Instr) -> Instr {
+        let name_to_replace = match i {
+            Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
+                Some(l)
+            }
+            _ => None,
+        };
+
+        let potential_rename = name_to_replace.and_then(|name| self.function_symbols.get(name));
+        let chosen_rename = potential_rename.and_then(|name| defined.get(name));
+
+        // Not the rename we chose.
+        if chosen_rename != name_to_replace {
+            return i.clone();
+        }
+
+        if let Some(new_name) = potential_rename.cloned() {
+            let new_name = format!("_$_{new_name}");
+            return match i {
+                Instr::Globl(_) => Instr::Globl(new_name),
+                Instr::Label(_) => Instr::Label(new_name),
+                Instr::B(_) => Instr::B(new_name),
+                Instr::Bl(_) => Instr::Bl(new_name),
+                Instr::Addr(_, v) => Instr::Addr(new_name, *v),
+                _ => i.clone(),
+            };
+        }
+
+        i.clone()
     }
 
     pub fn to_elf(&self, output: &str) -> Result<ElfObject, String> {
@@ -2109,20 +2233,32 @@ impl<T: SExp + HasSrcloc> Program<T> {
         let mut data_section = false;
         let mut data = "".to_string();
 
+        let mut defined_with_name = HashMap::new();
+
+        // Capture mappings from function symbols to names (one per target).
+        for i in self.finished_insns.iter() {
+            if let Instr::Globl(defname) = i
+                && let Some(funname) = self.function_symbols.get(defname)
+            {
+                // XXX When a bare symbol exists with no other information that
+                // XXX matches the looked-up name, gdb can set a breakpoint in
+                // XXX the containing block, which is the whole compilation unit
+                // XXX in this case.  Revisit this when we know how to mark up
+                // XXX the named symbol properly.
+                defined_with_name.insert(format!("_$_{funname}"), defname.clone());
+            }
+        }
+
         let mut decls: Vec<(String, Decl)> = self
             .finished_insns
             .iter()
             .filter_map(|i| {
+                let i = self.mutate_insn_with_functions(&defined_with_name, i);
                 if let Instr::Section(name) = i {
                     if name.starts_with(".debug") || name.starts_with(".eh") {
                         waiting_for_debug_info = Some(name.clone());
                         data_section = false;
                         return Some((name.to_string(), Decl::section(SectionKind::Debug).into()));
-                    } else if name == ".text" {
-                        waiting_for_debug_info = None;
-                        data_section = false;
-                        // Predefined.
-                        return None;
                     } else {
                         waiting_for_debug_info = None;
                         data_section = true;
@@ -2133,7 +2269,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
                         data = name.clone();
                         return Some((data.clone(), Decl::data().global().into()));
                     } else {
-                        return Some((name.to_string(), Decl::function().global().into()));
+                        return Some((name.to_string(), Decl::function().into()));
                     };
                 } else if let Instr::Bytes(b) = i {
                     // Define section in the faerie way.
@@ -2146,13 +2282,6 @@ impl<T: SExp + HasSrcloc> Program<T> {
                 None
             })
             .collect();
-
-        // Declare functions as imports and later link the labels they belong to.
-        for (label, funname) in self.function_symbols.iter() {
-            if label != funname {
-                decls.push((funname.clone(), Decl::function().into()));
-            }
-        }
 
         // Declare .debug_aranges
         decls.push((
@@ -2168,49 +2297,37 @@ impl<T: SExp + HasSrcloc> Program<T> {
         let mut in_function = None;
 
         let mut produced_code = 0;
-        let mut defined_colloquial_names = HashSet::new();
-        let mut handle_def_end = |defined_colloquial_names: &mut HashSet<String>,
-                                  function_body: &mut Vec<u8>,
-                                  in_function: &mut Option<String>|
-         -> Result<(), String> {
-            if let Some(defname) = in_function.as_ref() {
-                if !function_body.is_empty() {
-                    if let Some(funname) = self.function_symbols.get(defname) {
-                        if funname != defname && !defined_colloquial_names.contains(funname) {
-                            obj.define(funname, vec![]).map_err(|e| format!("{e:?}"))?;
-                            defined_colloquial_names.insert(funname.clone());
-                        }
+        let mut handle_def_end =
+            |function_body: &mut Vec<u8>, in_function: &mut Option<String>| -> Result<(), String> {
+                if let Some(defname) = in_function.as_ref()
+                    && !function_body.is_empty()
+                {
+                    let mut aligned_body = function_body.clone();
+                    while !aligned_body.len().is_multiple_of(16) {
+                        aligned_body.push(0);
                     }
-                    produced_code += function_body.len();
-                    obj.define(defname, function_body.clone())
+                    produced_code += aligned_body.len();
+                    obj.define(defname, aligned_body)
                         .map_err(|e| format!("{e:?}"))?;
                     *function_body = Vec::new();
                 }
-            }
 
-            Ok(())
-        };
+                Ok(())
+            };
 
         for i in self.finished_insns.iter() {
-            if let Instr::Globl(name) = i {
-                handle_def_end(
-                    &mut defined_colloquial_names,
-                    &mut function_body,
-                    &mut in_function,
-                )?;
+            let insn_with_function_names = self.mutate_insn_with_functions(&defined_with_name, i);
+            if let Instr::Globl(name) = &insn_with_function_names {
+                handle_def_end(&mut function_body, &mut in_function)?;
                 in_function = Some(name.to_string());
             }
 
             if let Some(f) = in_function.as_ref() {
-                i.encode(&mut function_body, &mut relocations, &f);
+                insn_with_function_names.encode(&mut function_body, &mut relocations, f);
             }
         }
 
-        handle_def_end(
-            &mut defined_colloquial_names,
-            &mut function_body,
-            &mut in_function,
-        )?;
+        handle_def_end(&mut function_body, &mut in_function)?;
         // Create .debug_aranges
         let mut debug_aranges: Vec<u8> = (0..0x20).map(|_| 0).collect();
         write_u32(&mut debug_aranges, 0, 0x1c);
@@ -2265,12 +2382,14 @@ impl<T: SExp + HasSrcloc> Program<T> {
         })
     }
 
-    pub fn new<C: CreateSExp<T>>(
-        program: HashMap<String, T::Srcloc>,
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        creator: &mut C,
+        program: HashMap<String, C::SL>,
         filename: &str,
         elf_output: &str,
-        sexp: T,
-        env: T,
+        sexp: C::S,
+        env: C::S,
         target_addr: u32,
         symbol_table: Rc<HashMap<String, String>>,
     ) -> Result<Self, String> {
@@ -2289,7 +2408,11 @@ impl<T: SExp + HasSrcloc> Program<T> {
                     let selected = if let Some(target_loc) = program.get(name) {
                         all_matches
                             .iter()
-                            .find(|matched| target_loc.overlap(&matched.loc()))
+                            .find(|matched| {
+                                let matched_ref: &C::S = matched;
+                                let matched_clone: C::S = matched_ref.clone();
+                                target_loc.overlap(&creator.loc(matched_clone))
+                            })
                             .cloned()
                     } else {
                         None
@@ -2305,7 +2428,7 @@ impl<T: SExp + HasSrcloc> Program<T> {
 
         let dwarf_builder =
             DwarfBuilder::new(filename, elf_output, target_addr, symbol_table.clone());
-        let mut p: Program<T> = Program {
+        let mut p: Program<C> = Program {
             finished_insns: Vec::new(),
             first_label: Default::default(),
             env_label: Default::default(),
@@ -2326,19 +2449,18 @@ impl<T: SExp + HasSrcloc> Program<T> {
         };
 
         p.symbol_table = symbol_table;
-        let loc = T::Srcloc::start("*env*");
         let envhash = sexp.sha256tree();
         for (remap_hash, name, remap_sexp) in remap_hashes.into_iter() {
             let remap_hash_hex = hex::encode(&remap_hash);
             p.renamed_symbols
                 .insert(remap_hash_hex.clone(), name.clone());
-            p.add_sexp(&remap_sexp.loc(), &remap_hash, remap_sexp.clone());
+            p.add_sexp(&remap_hash, remap_sexp.clone());
         }
         p.first_label = p.add(sexp.clone());
-        p.start_insns::<C>();
-        p.env_label = p.add_sexp(&loc, &envhash, env);
-        p.emit_waiting::<C>();
-        p.finish_insns::<C>()?;
+        p.start_insns(creator);
+        p.env_label = p.add_sexp(&envhash, env);
+        p.emit_waiting(creator);
+        p.finish_insns(creator)?;
         Ok(p)
     }
 }

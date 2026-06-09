@@ -19,16 +19,15 @@ impl ClvmrAllocator {
     where
         F: FnOnce(&Allocator) -> R,
     {
-        let ref_imu = (&*self.a).borrow();
+        let ref_imu = (*self.a).borrow();
         f(&ref_imu)
     }
 
-    #[cfg(test)]
     pub fn with_allocator_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut Allocator) -> R,
     {
-        let mut ref_mut = (&*self.a).borrow_mut();
+        let mut ref_mut = (*self.a).borrow_mut();
         f(&mut ref_mut)
     }
 }
@@ -43,8 +42,8 @@ impl Default for ClvmrAllocator {
 
 #[derive(Clone)]
 pub struct ClvmrWrapper {
-    a: ClvmrAllocator,
-    n: NodePtr,
+    pub a: ClvmrAllocator,
+    pub n: NodePtr,
 }
 
 impl ClvmrWrapper {
@@ -53,14 +52,6 @@ impl ClvmrWrapper {
         F: FnOnce(&Allocator) -> R,
     {
         self.a.with_allocator(f)
-    }
-
-    #[cfg(test)]
-    fn with_allocator_mut<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut Allocator) -> R,
-    {
-        self.a.with_allocator_mut(f)
     }
 }
 

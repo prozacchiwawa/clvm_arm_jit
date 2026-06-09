@@ -185,10 +185,10 @@ impl run_blocking::BlockingEventLoop for EmuGdbEventLoop {
 
 pub fn start_stub(
     port: Option<u16>,
-) -> Result<(SocketAddr, Box<dyn ConnectionExt<Error = std::io::Error>>), ()> {
-    let connection = wait_for_tcp(port).map_err(|_| ())?;
+) -> Result<(SocketAddr, Box<dyn ConnectionExt<Error = std::io::Error>>), String> {
+    let connection = wait_for_tcp(port).map_err(|e| format!("{e:?}"))?;
     Ok((
-        connection.local_addr().map_err(|_| ())?,
+        connection.local_addr().map_err(|e| format!("{e:?}"))?,
         Box::new(connection),
     ))
 }
@@ -207,12 +207,14 @@ pub fn run_stub(
     Ok(())
 }
 
+type CallbackConnectionFun = dyn FnMut(&[u8]) -> Result<(), io::Error>;
+
 pub struct CallbackConnection {
-    output: Box<dyn FnMut(&[u8]) -> Result<(), io::Error>>,
+    output: Box<CallbackConnectionFun>,
 }
 
 impl CallbackConnection {
-    pub fn new(output: Box<dyn FnMut(&[u8]) -> Result<(), io::Error>>) -> Self {
+    pub fn new(output: Box<CallbackConnectionFun>) -> Self {
         CallbackConnection { output }
     }
 }
@@ -246,7 +248,7 @@ impl CallbackGdbStub {
     pub fn new(
         elf_bin: &[u8],
         symbols: Rc<std::collections::HashMap<String, String>>,
-        output: Box<dyn FnMut(&[u8]) -> Result<(), io::Error>>,
+        output: Box<CallbackConnectionFun>,
     ) -> Result<Self, String> {
         let mut emu = Emu::new(elf_bin, clvm_to_arm_generate::code::TARGET_ADDR, symbols)
             .map_err(|e| format!("could not create emulator: {e:?}"))?;

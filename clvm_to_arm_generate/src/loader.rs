@@ -78,14 +78,11 @@ impl<'a> ElfLoader<'a> {
         for (i, s) in loader.elf.section_header_iter().enumerate() {
             if s.flags().contains(SectionHeaderFlags::SHF_ALLOC) {
                 let align_mask = (s.addralign() - 1) as u32;
-                eprintln!("align mask for {s:?}: {align_mask:x} {:x}", s.size());
                 section_addr = (section_addr + align_mask) & !align_mask;
                 loader.sections.push(section_addr);
-                eprintln!("{i} {s:?}");
-                eprintln!("load section {} at {section_addr:08x}", i);
                 section_addr += s.size() as u32;
             } else {
-                loader.sections.push(0);
+                loader.sections.push(0xff000000);
             }
 
             if matches!(s.sh_type(), SectionType::SHT_RELA) {
@@ -258,8 +255,6 @@ impl<'a> ElfLoader<'a> {
                 if let Some(content) = s.content() {
                     memory.write_data(content, section_addr);
                 }
-                eprintln!("{i} {s:?}");
-                eprintln!("load section {} at {section_addr:08x}", i);
             }
         }
 

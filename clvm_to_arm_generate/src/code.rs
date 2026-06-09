@@ -733,7 +733,7 @@ impl DwarfBuilder {
         let unit_ent = unit.get_mut(unit.root());
         unit_ent.set(
             DW_AT_low_pc,
-            AttributeValue::Address(Address::Constant(target_addr as u64)),
+            AttributeValue::Address(Address::Constant((target_addr) as u64)),
         );
         unit_ent.set(DW_AT_name, AttributeValue::String(filename.clone()));
         unit_ent.set(DW_AT_language, AttributeValue::Language(DW_LANG_C99));
@@ -1175,7 +1175,7 @@ impl DwarfBuilder {
         // We'll make 3 subprograms to represent where the current arguments can be arrived
         // at from, then decorate all of them with the argument retriever below.
 
-        let mut subprogram_names = vec![name.clone()];
+        let subprogram_names = vec![name.clone()];
         let subprogram_ids = {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let mut subprogram_ids = Vec::with_capacity(subprogram_names.len());
@@ -1869,10 +1869,9 @@ impl<C: CreateSExp> Program<C> {
         source_sexp: C::S,
         srcloc: &C::SL,
         instr: Instr,
-        begin_end_block: Option<BeginEndBlock>,
+        mut begin_end_block: Option<BeginEndBlock>,
     ) {
         let size = instr.size(self.current_addr);
-
         let insert_instr = if let Instr::Globl(g) = &instr {
             // Two things: ensure we switch to real function names when we
             // have them.
@@ -2049,20 +2048,60 @@ impl<C: CreateSExp> Program<C> {
         let srcloc = C::SL::start("*prolog*");
         let source_sexp = creator.atom(srcloc.clone(), b"prolog");
         for i in &[
-            Instr::Section(".text".to_string()),
             Instr::Align4,
             Instr::Globl("_start".to_string()),
             Instr::Label("_start".to_string()),
+        ] {
+            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+        }
+
+        self.push_be(
+            creator,
+            source_sexp.clone(),
+            &srcloc,
+            Instr::Push(vec![Register::FP, Register::LR]),
+            Some(BeginEndBlock::BeginBlock),
+        );
+        for i in &[
+            Instr::Addi(Register::FP, Register::SP, 4),
+            Instr::Subi(Register::SP, Register::SP, 0x18),
+            Instr::Str(Register::R(4), Register::SP, 0),
+            Instr::Str(Register::R(5), Register::SP, 4),
+            Instr::Str(Register::R(6), Register::SP, 8),
+            Instr::Str(Register::R(7), Register::SP, 12),
+            // Load the env into r0 and the global data addr into r5.
             Instr::Lea(Register::R(5), "_run".to_string()),
             Instr::Ldr(Register::R(7), Register::R(5), 4),
             Instr::Addi(Register::R(0), Register::R(7), 0),
+            // Call the program.
             Instr::Bl(self.first_label.clone()),
             // Print the last value.
             Instr::Swi(SWI_PRINT_EXPR),
             Instr::Swi(SWI_DONE),
         ] {
-            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+            self.push(creator, source_sexp.clone(), &creator.loc(source_sexp.clone()), i.clone());
         }
+
+        // Epilogue doesn't really matter since we did SWI_DONE, but it has symmetry
+        // with other functions in the program.
+        for i in &[
+            Instr::Ldr(Register::R(4), Register::SP, 0),
+            Instr::Ldr(Register::R(5), Register::SP, 4),
+            Instr::Ldr(Register::R(6), Register::SP, 8),
+            Instr::Ldr(Register::R(7), Register::SP, 12),
+            Instr::Subi(Register::SP, Register::FP, 4),
+            Instr::Pop(vec![Register::FP, Register::LR]),
+        ] {
+            self.push(creator, source_sexp.clone(), &creator.loc(source_sexp.clone()), i.clone());
+        }
+
+        self.push_be(
+            creator,
+            source_sexp.clone(),
+            &creator.loc(source_sexp.clone()),
+            Instr::Bx(Register::LR),
+            Some(BeginEndBlock::EndBlock),
+        );
     }
 
     fn finish_insns(&mut self, creator: &mut C) -> Result<(), String> {
@@ -2143,6 +2182,43 @@ impl<C: CreateSExp> Program<C> {
         Ok(())
     }
 
+    fn mutate_insn_with_functions(
+        &self,
+        defined: &HashMap<String, String>,
+        i: &Instr
+    ) -> Instr {
+        let name_to_replace =
+            match i {
+                Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
+                    Some(l)
+                }
+                _ => None
+            };
+
+        let potential_rename = name_to_replace.and_then(|name| self.function_symbols.get(name));
+        let chosen_rename = potential_rename.and_then(|name| defined.get(name));
+
+        // Not the rename we chose.
+        if chosen_rename != name_to_replace {
+            return i.clone();
+        }
+
+        if let Some(new_name) = potential_rename.cloned() {
+            let new_name = format!("_$_{new_name}");
+            return
+                match i {
+                    Instr::Globl(_) => Instr::Globl(new_name),
+                    Instr::Label(_) => Instr::Label(new_name),
+                    Instr::B(_) => Instr::B(new_name),
+                    Instr::Bl(_) => Instr::Bl(new_name),
+                    Instr::Addr(_, v) => Instr::Addr(new_name, *v),
+                    _ => i.clone()
+                };
+        }
+
+        i.clone()
+    }
+
     pub fn to_elf(&self, output: &str) -> Result<ElfObject, String> {
         let synthetic_source = self.dwarf_builder.synthetic_source();
         let mut sections = Vec::new();
@@ -2154,20 +2230,36 @@ impl<C: CreateSExp> Program<C> {
         let mut data_section = false;
         let mut data = "".to_string();
 
+        let mut defined_with_name = HashMap::new();
+
+        // Capture mappings from function symbols to names (one per target).
+        for i in self.finished_insns.iter() {
+            if let Instr::Globl(defname) = i {
+                if let Some(funname) = self.function_symbols.get(defname) {
+                    // XXX When a bare symbol exists with no other information that
+                    // XXX matches the looked-up name, gdb can set a breakpoint in
+                    // XXX the containing block, which is the whole compilation unit
+                    // XXX in this case.  Revisit this when we know how to mark up
+                    // XXX the named symbol properly.
+                    defined_with_name.insert(format!("_$_{funname}"), defname.clone());
+                }
+            }
+        }
+
+
         let mut decls: Vec<(String, Decl)> = self
             .finished_insns
             .iter()
             .filter_map(|i| {
+                let i = self.mutate_insn_with_functions(
+                    &defined_with_name,
+                    i
+                );
                 if let Instr::Section(name) = i {
                     if name.starts_with(".debug") || name.starts_with(".eh") {
                         waiting_for_debug_info = Some(name.clone());
                         data_section = false;
                         return Some((name.to_string(), Decl::section(SectionKind::Debug).into()));
-                    } else if name == ".text" {
-                        waiting_for_debug_info = None;
-                        data_section = false;
-                        // Predefined.
-                        return None;
                     } else {
                         waiting_for_debug_info = None;
                         data_section = true;
@@ -2177,8 +2269,10 @@ impl<C: CreateSExp> Program<C> {
                     if data_section {
                         data = name.clone();
                         return Some((data.clone(), Decl::data().global().into()));
+                    } else if name == "_start" {
+                        return Some((name.to_string(), Decl::function().into()));
                     } else {
-                        return Some((name.to_string(), Decl::function().global().into()));
+                        return Some((name.to_string(), Decl::function().into()));
                     };
                 } else if let Instr::Bytes(b) = i {
                     // Define section in the faerie way.
@@ -2191,13 +2285,6 @@ impl<C: CreateSExp> Program<C> {
                 None
             })
             .collect();
-
-        // Declare functions as imports and later link the labels they belong to.
-        for (label, funname) in self.function_symbols.iter() {
-            if label != funname {
-                decls.push((funname.clone(), Decl::function().into()));
-            }
-        }
 
         // Declare .debug_aranges
         decls.push((
@@ -2213,23 +2300,18 @@ impl<C: CreateSExp> Program<C> {
         let mut in_function = None;
 
         let mut produced_code = 0;
-        let mut defined_colloquial_names = HashSet::new();
-        let mut handle_def_end = |defined_colloquial_names: &mut HashSet<String>,
-                                  function_body: &mut Vec<u8>,
+        let mut handle_def_end = |function_body: &mut Vec<u8>,
                                   in_function: &mut Option<String>|
          -> Result<(), String> {
             if let Some(defname) = in_function.as_ref()
                 && !function_body.is_empty()
             {
-                if let Some(funname) = self.function_symbols.get(defname)
-                    && funname != defname
-                    && !defined_colloquial_names.contains(funname)
-                {
-                    obj.define(funname, vec![]).map_err(|e| format!("{e:?}"))?;
-                    defined_colloquial_names.insert(funname.clone());
+                let mut aligned_body = function_body.clone();
+                while !aligned_body.len().is_multiple_of(16) {
+                    aligned_body.push(0);
                 }
-                produced_code += function_body.len();
-                obj.define(defname, function_body.clone())
+                produced_code += aligned_body.len();
+                obj.define(defname, aligned_body)
                     .map_err(|e| format!("{e:?}"))?;
                 *function_body = Vec::new();
             }
@@ -2238,9 +2320,12 @@ impl<C: CreateSExp> Program<C> {
         };
 
         for i in self.finished_insns.iter() {
-            if let Instr::Globl(name) = i {
+            let insn_with_function_names = self.mutate_insn_with_functions(
+                &defined_with_name,
+                i
+            );
+            if let Instr::Globl(name) = &insn_with_function_names {
                 handle_def_end(
-                    &mut defined_colloquial_names,
                     &mut function_body,
                     &mut in_function,
                 )?;
@@ -2248,12 +2333,11 @@ impl<C: CreateSExp> Program<C> {
             }
 
             if let Some(f) = in_function.as_ref() {
-                i.encode(&mut function_body, &mut relocations, f);
+                insn_with_function_names.encode(&mut function_body, &mut relocations, f);
             }
         }
 
         handle_def_end(
-            &mut defined_colloquial_names,
             &mut function_body,
             &mut in_function,
         )?;

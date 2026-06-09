@@ -594,6 +594,13 @@ impl fmt::Display for Instr {
     }
 }
 
+#[derive(Clone)]
+struct DwarfLineRow {
+    filename: String,
+    line: u64,
+    col: u64,
+}
+
 struct DwarfBuilder {
     unit_id: UnitId,
     file_to_id: HashMap<Vec<u8>, (DirectoryId, FileId)>,
@@ -613,7 +620,7 @@ struct DwarfBuilder {
     dwarf: Dwarf,
     frame_table: FrameTable,
     cfi_cie_id: Option<CieId>,
-    last_row_source: Option<(String, u64, u64)>,
+    last_row_source: Option<DwarfLineRow>,
     last_statement_source_line: Option<(String, u64)>,
 }
 
@@ -896,8 +903,6 @@ impl DwarfBuilder {
         }
 
         let source_file = loc.filename();
-        let source_key = (source_file.clone(), loc.line() as u64, loc.col() as u64);
-        let source_line_key = (source_file, loc.line() as u64);
         let synthetic_file_id = self
             .synthetic_file_id
             .expect("synthetic source file registered");
@@ -912,11 +917,28 @@ impl DwarfBuilder {
             let (_, file_id) = self.add_file(&loc.filename());
             (file_id, loc.line() as u64, loc.col() as u64)
         };
-        let source_changed = self
-            .last_row_source
-            .as_ref()
-            .map(|prev| prev != &source_key)
-            .unwrap_or(true);
+
+        // Figure out whether the source changed.
+        let source_changed =
+            if let Some(last) = self.last_row_source.as_ref() {
+                source_file != last.filename ||
+                    line != last.line ||
+                    col != last.col
+            } else {
+                true
+            };
+
+        let new_last_row =
+            if let Some(last_row) = &self.last_row_source && !source_changed {
+                last_row.clone()
+            } else {
+                DwarfLineRow {
+                    filename: source_file.clone(),
+                    line,
+                    col,
+                }
+            };
+
         let control_flow_or_dispatch = matches!(
             instr,
             Instr::B(_)
@@ -926,27 +948,13 @@ impl DwarfBuilder {
                 | Instr::Swi(_)
                 | Instr::SwiEq(_)
         );
+
         let is_statement = addr == self.seq_addr_start
-            || begin_end_block == Some(BeginEndBlock::BeginBlock)
+            || begin_end_block.is_some()
             || source_changed
             || control_flow_or_dispatch;
-        if is_statement && !using_synthetic_file {
-            let same_statement_source_line = self
-                .last_statement_source_line
-                .as_ref()
-                .map(|prev| prev == &source_line_key)
-                .unwrap_or(false);
-            // Keep the first statement point on a real source line, and map
-            // repeated statement boundaries on that line to the synthetic file.
-            if same_statement_source_line {
-                file_id = synthetic_file_id;
-                line = self.add_synthetic_line::<C>(loc, source_sexp);
-                col = 1;
-                using_synthetic_file = true;
-            }
-        }
 
-        if is_statement || source_changed || control_flow_or_dispatch {
+        if is_statement || control_flow_or_dispatch || source_changed {
             let unit = self.dwarf.units.get_mut(self.unit_id);
             let row = unit.line_program.row();
             row.address_offset = (addr - self.seq_addr_start) as u64;
@@ -957,14 +965,8 @@ impl DwarfBuilder {
             row.basic_block = begin_end_block == Some(BeginEndBlock::BeginBlock);
             let emitted_statement = row.is_statement;
             unit.line_program.generate_row();
-            if emitted_statement {
-                if using_synthetic_file {
-                    self.last_statement_source_line = None;
-                } else {
-                    self.last_statement_source_line = Some(source_line_key);
-                }
-            }
-            self.last_row_source = Some(source_key);
+
+            self.last_row_source = Some(new_last_row);
         }
     }
 

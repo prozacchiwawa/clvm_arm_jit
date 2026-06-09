@@ -1997,7 +1997,7 @@ fn test_rue_compile_and_run_as_arm() {
         output: output.to_string(),
     }).unwrap();
     let mut allocator = Allocator::new();
-    std::fs::write(output, &compiled.object.object_file).unwrap();
+    // std::fs::write(output, &compiled.object.object_file).unwrap();
     let result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,

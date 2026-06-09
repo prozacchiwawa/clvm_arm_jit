@@ -1,0 +1,12 @@
+[package]
+name = "clvm_to_arm_build_rue"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clvm_to_arm_rue = { path = "../clvm_to_arm_rue" }
+clap = { version = "4.6.1", features = [ "derive" ] }
+
+[[bin]]
+name = "clvm_to_arm_build_rue"
+path = "src/main.rs"

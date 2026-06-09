@@ -1,5 +1,3 @@
-pub mod rue_lowerer;
-
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,10 +29,10 @@ use chialisp::classic::clvm::sexp::proper_list;
 use chialisp::compiler::sexp::decode_string;
 use chialisp::util::Number;
 
-struct Args {
-    filename: String,
-    env: String,
-    output: String,
+pub struct Args {
+    pub filename: String,
+    pub env: String,
+    pub output: String,
 }
 
 #[derive(Clone)]
@@ -1886,9 +1884,9 @@ impl CreateSExp for CreateRueSExp {
     }
 }
 
-struct RueGenerateOutput {
-    object: ElfObject,
-    symbols: Rc<HashMap<String, String>>,
+pub struct RueGenerateOutput {
+    pub object: ElfObject,
+    pub symbols: Rc<HashMap<String, String>>,
 }
 
 pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> {

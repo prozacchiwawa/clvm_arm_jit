@@ -360,6 +360,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clvm_to_arm_build_rue"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "clvm_to_arm_rue",
+]
+
+[[package]]
 name = "clvm_to_arm_chialisp"
 version = "0.1.0"
 dependencies = [

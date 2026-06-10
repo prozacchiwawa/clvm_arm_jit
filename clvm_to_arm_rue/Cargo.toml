@@ -17,3 +17,6 @@ rue-lir = "0.8.4"
 rue-options = "0.8.4"
 hex = "0.4.3"
 rowan = "0.16.1"
+
+[dev-dependencies]
+clvm_to_arm_test = { path = "../clvm_to_arm_test" }

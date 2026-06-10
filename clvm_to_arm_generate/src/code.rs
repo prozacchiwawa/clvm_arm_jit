@@ -2216,8 +2216,6 @@ impl<C: CreateSExp> Program<C> {
             }
         }
 
-        eprintln!("function symbols {:?}", self.function_symbols);
-
         self.dwarf_builder
             .write(self.current_addr, &mut self.finished_insns)
             .unwrap();

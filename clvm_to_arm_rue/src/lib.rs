@@ -23,6 +23,7 @@ use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
+use clvm_to_arm_test::run_gdb;
 
 use chialisp::classic::clvm_tools::binutils::assemble;
 #[cfg(test)]
@@ -1554,7 +1555,11 @@ fn add_function_symbol_metadata(
     let mut key = format!("{hash}_arguments");
     symbol_table.insert(key, arguments.to_string());
     key = format!("{hash}_left_env");
-    symbol_table.insert(key, "0".to_string());
+    if name == "main" {
+        symbol_table.insert(key, "0".to_string());
+    } else {
+        symbol_table.insert(key, "1".to_string());
+    }
 }
 
 struct RueCompileOutput {
@@ -1876,18 +1881,22 @@ fn test_rue_assert_fail() {
         output: output.to_string(),
     })
         .unwrap();
-    
+
     let mut allocator = Allocator::new();
     std::fs::write(output, &compiled.object.object_file).unwrap();
-    let result = Emu::run_to_exit(
-        &mut allocator,
-        &compiled.object.object_file,
-        TARGET_ADDR,
+    let result = run_gdb(
+        compiled.object,
         compiled.symbols,
-    )
-        .unwrap();
-    assert_eq!(
-        result.map(|result| disassemble(&allocator, result, None)),
-        Some("()".to_string())
-    );
+        &[
+            "set confirm off",
+            "dir ../resources/tests",
+            "$REMOTE",
+            "source ../support/gdb_print_sexp.py",
+            "cont",
+            "bt",
+            "quit"
+        ]
+    ).unwrap();
+    eprintln!("result {result}");
+    todo!();
 }

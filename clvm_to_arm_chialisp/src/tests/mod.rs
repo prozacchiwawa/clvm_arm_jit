@@ -16,15 +16,27 @@ use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
-use clvm_to_arm_generate::code::{Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::{Program, TARGET_ADDR, ElfObject};
+#[cfg(test)]
+use clvm_to_arm_test::run_gdb;
 
 use crate::sexp_trait::{CreateChialispSExp, RcSExp, SrclocWrap};
 
 #[cfg(test)]
-fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
+struct CompileResult {
+    object: ElfObject,
+    symbols: Rc<HashMap<String, String>>,
+}
+
+#[cfg(test)]
+fn compile(
+    allocator: &mut Allocator,
+    filename: &str,
+    program: &str,
+    env: &str
+) -> Result<CompileResult, String> {
     let srcloc = Srcloc::start(filename);
-    let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).expect("should parse");
-    let mut allocator = Allocator::new();
+    let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).map_err(|e| format!("{e:?}"))?;
     let mut symbol_table = HashMap::new();
     let runner: Rc<dyn TRunProgram> = Rc::new(DefaultProgramRunner::new());
     let search_paths = vec![];
@@ -50,11 +62,10 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
         .collect();
 
-    let compiled = compile_file(&mut allocator, runner, opts, program, &mut symbol_table)
-        .expect("should compile")
+    let compiled = compile_file(allocator, runner, opts, program, &mut symbol_table).map_err(|e| format!("{e:?}"))?
         .to_sexp();
     build_symbol_table_mut(&mut symbol_table, &compiled);
-    let tmpfile = NamedTempFile::new().expect("should be able to make a temp file");
+    let tmpfile = NamedTempFile::new().map_err(|e| format!("{e:?}"))?;
     let tmpname = tmpfile.path().to_str().unwrap().to_string();
     let symbols = Rc::new(symbol_table);
     let generator = Program::new(
@@ -66,14 +77,38 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         RcSExp(env_parsed[0].clone()),
         TARGET_ADDR,
         symbols.clone(),
-    )
-    .expect("should be generatable");
-    let elf_data = generator.to_elf(&tmpname).expect("should generate");
+    )?;
+    Ok(CompileResult {
+        object: generator.to_elf(&tmpname)?,
+        symbols,
+    })
+}
+
+#[cfg(test)]
+fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
+    let mut allocator = Allocator::new();
+    let compiled = compile(&mut allocator, filename, program, env)?;
     let node_result =
-        Emu::run_to_exit(&mut allocator, &elf_data.object_file, TARGET_ADDR, symbols)?;
+        Emu::run_to_exit(&mut allocator, &compiled.object.object_file, TARGET_ADDR, compiled.symbols.clone())?;
     Ok(node_result.map(|r| {
         convert_from_clvm_rs(&mut allocator, Srcloc::start("*emu*"), r).expect("converted")
     }))
+}
+
+#[cfg(test)]
+fn compile_and_gdb(
+    filename: &str,
+    program: &str,
+    env: &str,
+    gdb_commands: &[&str],
+) -> Result<String, String> {
+    let mut allocator = Allocator::new();
+    let compiled = compile(&mut allocator, filename, program, env)?;
+    run_gdb(
+        compiled.object,
+        compiled.symbols.clone(),
+        gdb_commands,
+    )
 }
 
 #[test]
@@ -281,4 +316,23 @@ fn test_compile_and_run_apply_function_1() {
     .expect("should run")
     .unwrap();
     assert_eq!(result.to_string(), "18");
+}
+
+#[test]
+fn test_gdb_breakpoint_on_function_classic() {
+    let result = compile_and_gdb(
+        "test.clsp",
+        "(mod (A)\n  (defun F (X Y) (+ X Y))\n  (F A 3)\n)",
+        "(17)",
+        &[
+            "set confirm off",
+            "break F",
+            "info breakpoints",
+            "quit"
+        ]
+    )
+        .expect("should compile and load");
+    eprintln!("result {result}");
+    assert!(!result.contains("<MULTIPLE>"));
+    assert!(result.contains("clsp:2"));
 }

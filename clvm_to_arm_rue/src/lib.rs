@@ -1826,7 +1826,7 @@ fn test_rue_compile_and_run_as_arm() {
         filename: "../resources/tests/factorial.rue".to_string(),
         output: output.to_string(),
     })
-    .unwrap();
+        .unwrap();
     let mut allocator = Allocator::new();
     // std::fs::write(output, &compiled.object.object_file).unwrap();
     let result = Emu::run_to_exit(
@@ -1835,9 +1835,59 @@ fn test_rue_compile_and_run_as_arm() {
         TARGET_ADDR,
         compiled.symbols,
     )
-    .unwrap();
+        .unwrap();
     assert_eq!(
         result.map(|result| disassemble(&allocator, result, None)),
         Some("120".to_string())
+    );
+}
+
+
+#[test]
+fn test_rue_assert_succeed() {
+    let output = "test_assert.rue.elf";
+    let compiled = compile_rue_to_arm_elf(&Args {
+        env: "(5 3)".to_string(),
+        filename: "../resources/tests/test_assert.rue".to_string(),
+        output: output.to_string(),
+    })
+        .unwrap();
+    let mut allocator = Allocator::new();
+    // std::fs::write(output, &compiled.object.object_file).unwrap();
+    let result = Emu::run_to_exit(
+        &mut allocator,
+        &compiled.object.object_file,
+        TARGET_ADDR,
+        compiled.symbols,
+    )
+        .unwrap();
+    assert_eq!(
+        result.map(|result| disassemble(&allocator, result, None)),
+        Some("()".to_string())
+    );
+}
+
+#[test]
+fn test_rue_assert_fail() {
+    let output = "test_assert.rue.elf";
+    let compiled = compile_rue_to_arm_elf(&Args {
+        env: "(16384 19)".to_string(),
+        filename: "../resources/tests/test_assert.rue".to_string(),
+        output: output.to_string(),
+    })
+        .unwrap();
+    
+    let mut allocator = Allocator::new();
+    std::fs::write(output, &compiled.object.object_file).unwrap();
+    let result = Emu::run_to_exit(
+        &mut allocator,
+        &compiled.object.object_file,
+        TARGET_ADDR,
+        compiled.symbols,
+    )
+        .unwrap();
+    assert_eq!(
+        result.map(|result| disassemble(&allocator, result, None)),
+        Some("()".to_string())
     );
 }

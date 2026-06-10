@@ -1,5 +1,5 @@
 [package]
-name = "clvm_to_arm_chialisp"
+name = "clvm_to_arm_test"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,6 +9,4 @@ tempfile = "3.27.0"
 clvm_to_arm_generate = { path = "../clvm_to_arm_generate" }
 clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate" }
 clvmr = "0.16.4"
-
-[dev-dependencies]
-clvm_to_arm_test = { path = "../clvm_to_arm_test" }
+subprocess = "1.1.0"

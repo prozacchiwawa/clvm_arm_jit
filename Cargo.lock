@@ -374,6 +374,7 @@ dependencies = [
  "chialisp",
  "clvm_to_arm_emulate",
  "clvm_to_arm_generate",
+ "clvm_to_arm_test",
  "clvmr",
  "tempfile",
 ]
@@ -441,6 +442,18 @@ dependencies = [
  "serde",
  "serde_json",
  "target-lexicon 0.11.2",
+]
+
+[[package]]
+name = "clvm_to_arm_test"
+version = "0.1.0"
+dependencies = [
+ "chialisp",
+ "clvm_to_arm_emulate",
+ "clvm_to_arm_generate",
+ "clvmr",
+ "subprocess",
+ "tempfile",
 ]
 
 [[package]]
@@ -1830,6 +1843,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "subprocess"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3713691ac66e56ba6bafb8a62158859653b3127ae5cacae98d437bbb0c9ccb06"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,6 +2183,28 @@ dependencies = [
  "indexmap 2.14.0",
  "semver",
 ]
+
+[[package]]
+name = "winapi"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
+dependencies = [
+ "winapi-i686-pc-windows-gnu",
+ "winapi-x86_64-pc-windows-gnu",
+]
+
+[[package]]
+name = "winapi-i686-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+
+[[package]]
+name = "winapi-x86_64-pc-windows-gnu"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-link"

@@ -23,6 +23,7 @@ use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
+#[cfg(test)]
 use clvm_to_arm_test::run_gdb;
 
 use chialisp::classic::clvm_tools::binutils::assemble;

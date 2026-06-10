@@ -1336,6 +1336,7 @@ pub struct Program<C: CreateSExp> {
     current_symbol_name: Option<String>,
     function_symbols: HashMap<String, String>,
     renamed_symbols: HashMap<String, String>,
+    defined_with_name: HashMap<String, String>,
     start_addr: usize,
     current_addr: usize,
     dwarf_builder: DwarfBuilder,
@@ -2184,6 +2185,39 @@ impl<C: CreateSExp> Program<C> {
             }
         }
 
+        // Capture mappings from function symbols to names (one per target).
+        for i in self.finished_insns.iter() {
+            if let Instr::Globl(defname) = i {
+                // XXX When a bare symbol exists with no other information that
+                // XXX matches the looked-up name, gdb can set a breakpoint in
+                // XXX the containing block, which is the whole compilation unit
+                // XXX in this case.  Revisit this when we know how to mark up
+                // XXX the named symbol properly.
+                if let Some(funname) = self.function_symbols.get(defname) {
+                    self.defined_with_name.insert(format!("_$_{funname}"), defname.clone());
+                }
+
+                let start =
+                    if defname.starts_with("_$_") {
+                        Some(3)
+                    } else if defname.starts_with("_") {
+                        Some(1)
+                    } else {
+                        None
+                    };
+                if let Some(start) = start {
+                    if defname.len() >= start + 64 {
+                        let stripped_symbol = &defname[start..(start + 64)];
+                        if let Some(funname) = self.symbol_table.get(stripped_symbol) {
+                            self.defined_with_name.insert(funname.clone(), funname.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        eprintln!("function symbols {:?}", self.function_symbols);
+
         self.dwarf_builder
             .write(self.current_addr, &mut self.finished_insns)
             .unwrap();
@@ -2191,7 +2225,7 @@ impl<C: CreateSExp> Program<C> {
         Ok(())
     }
 
-    fn mutate_insn_with_functions(&self, defined: &HashMap<String, String>, i: &Instr) -> Instr {
+    fn mutate_insn_with_functions(&self, i: &Instr) -> Instr {
         let name_to_replace = match i {
             Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
                 Some(l)
@@ -2200,7 +2234,7 @@ impl<C: CreateSExp> Program<C> {
         };
 
         let potential_rename = name_to_replace.and_then(|name| self.function_symbols.get(name));
-        let chosen_rename = potential_rename.and_then(|name| defined.get(name));
+        let chosen_rename = potential_rename.and_then(|name| self.defined_with_name.get(name));
 
         // Not the rename we chose.
         if chosen_rename != name_to_replace {
@@ -2233,27 +2267,11 @@ impl<C: CreateSExp> Program<C> {
         let mut data_section = false;
         let mut data = "".to_string();
 
-        let mut defined_with_name = HashMap::new();
-
-        // Capture mappings from function symbols to names (one per target).
-        for i in self.finished_insns.iter() {
-            if let Instr::Globl(defname) = i
-                && let Some(funname) = self.function_symbols.get(defname)
-            {
-                // XXX When a bare symbol exists with no other information that
-                // XXX matches the looked-up name, gdb can set a breakpoint in
-                // XXX the containing block, which is the whole compilation unit
-                // XXX in this case.  Revisit this when we know how to mark up
-                // XXX the named symbol properly.
-                defined_with_name.insert(format!("_$_{funname}"), defname.clone());
-            }
-        }
-
         let mut decls: Vec<(String, Decl)> = self
             .finished_insns
             .iter()
             .filter_map(|i| {
-                let i = self.mutate_insn_with_functions(&defined_with_name, i);
+                let i = self.mutate_insn_with_functions(i);
                 if let Instr::Section(name) = i {
                     if name.starts_with(".debug") || name.starts_with(".eh") {
                         waiting_for_debug_info = Some(name.clone());
@@ -2316,7 +2334,7 @@ impl<C: CreateSExp> Program<C> {
             };
 
         for i in self.finished_insns.iter() {
-            let insn_with_function_names = self.mutate_insn_with_functions(&defined_with_name, i);
+            let insn_with_function_names = self.mutate_insn_with_functions(i);
             if let Instr::Globl(name) = &insn_with_function_names {
                 handle_def_end(&mut function_body, &mut in_function)?;
                 in_function = Some(name.to_string());
@@ -2440,6 +2458,7 @@ impl<C: CreateSExp> Program<C> {
             symbol_table: Default::default(),
             function_symbols: Default::default(),
             renamed_symbols: Default::default(),
+            defined_with_name: Default::default(),
             current_addr: 0,
             start_addr: 0,
             target_addr,

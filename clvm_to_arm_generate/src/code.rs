@@ -729,7 +729,7 @@ impl<C: CreateSExp> Program<C> {
                         // do quoted operator
                         self.do_operator(
                             creator,
-                            &creator.loc(a.clone()),
+                            &creator.loc(sexp.clone()),
                             &hash,
                             &atom,
                             b.clone(),
@@ -740,7 +740,7 @@ impl<C: CreateSExp> Program<C> {
                         // do unquoted operator
                         self.do_operator(
                             creator,
-                            &creator.loc(a_val.clone()),
+                            &creator.loc(sexp.clone()),
                             &hash,
                             &a,
                             b.clone(),

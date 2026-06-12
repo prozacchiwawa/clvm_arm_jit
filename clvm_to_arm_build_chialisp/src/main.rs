@@ -16,7 +16,7 @@ struct CmdArgs {
     include: Vec<String>,
 
     #[arg(short, long)]
-    env: String
+    env: String,
 }
 
 fn do_compile(args: &CmdArgs) -> Result<(), String> {
@@ -28,7 +28,7 @@ fn do_compile(args: &CmdArgs) -> Result<(), String> {
         &program,
         &args.output,
         &args.include,
-        &args.env
+        &args.env,
     )?;
     std::fs::write(&args.output, &compiled.object.object_file).map_err(|e| format!("{e:?}"))?;
     Ok(())
@@ -36,7 +36,7 @@ fn do_compile(args: &CmdArgs) -> Result<(), String> {
 
 fn main() {
     let args = CmdArgs::parse();
-     if let Err(e) = do_compile(&args) {
+    if let Err(e) = do_compile(&args) {
         eprintln!("error compiling: {e:?}");
         std::process::exit(1);
     }

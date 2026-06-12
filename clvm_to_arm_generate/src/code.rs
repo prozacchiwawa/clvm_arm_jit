@@ -757,12 +757,7 @@ impl<C: CreateSExp> Program<C> {
                 }
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
-                        self.load_atom(
-                            sexp.clone(),
-                            &creator.loc(sexp.clone()),
-                            &hash,
-                            &[],
-                        )
+                        self.load_atom(sexp.clone(), &creator.loc(sexp.clone()), &hash, &[])
                     } else {
                         self.env_select(sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
                     }
@@ -939,7 +934,9 @@ impl<C: CreateSExp> Program<C> {
                 } else {
                     None
                 };
-                if let Some(start) = start && defname.len() >= start + 64 {
+                if let Some(start) = start
+                    && defname.len() >= start + 64
+                {
                     let stripped_symbol = &defname[start..(start + 64)];
                     if let Some(funname) = self.symbol_table.get(stripped_symbol) {
                         self.defined_with_name
@@ -1140,8 +1137,7 @@ impl<C: CreateSExp> Program<C> {
             })
             .collect();
 
-        let dwarf_builder =
-            DwarfBuilder::new(filename, target_addr, symbol_table.clone());
+        let dwarf_builder = DwarfBuilder::new(filename, target_addr, symbol_table.clone());
         let mut p: Program<C> = Program {
             finished_insns: Vec::new(),
             first_label: Default::default(),

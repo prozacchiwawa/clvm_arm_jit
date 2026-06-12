@@ -1,29 +1,29 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clvmr::Allocator;
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvmr::Allocator;
 
+use chialisp::classic::clvm_tools::comp_input::RunAndCompileInputData;
 use chialisp::classic::clvm_tools::ir::r#type::NEW_BIT_CONSTANTS;
+use chialisp::classic::clvm_tools::stages;
 use chialisp::classic::clvm_tools::stages::stage_0::{DefaultProgramRunner, TRunProgram};
 use chialisp::classic::clvm_tools::stages::stage_2::operators::run_program_for_search_paths;
-use chialisp::classic::clvm_tools::stages;
-use chialisp::classic::clvm_tools::comp_input::RunAndCompileInputData;
 use chialisp::classic::platform::argparse::ArgumentValue;
 use chialisp::compiler::clvm::convert_from_clvm_rs;
-use chialisp::compiler::compiler::{compile_file, DefaultCompilerOpts};
+use chialisp::compiler::compiler::{DefaultCompilerOpts, compile_file};
 use chialisp::compiler::comptypes::CompilerOpts;
 use chialisp::compiler::debug::{build_swap_table_mut, build_symbol_table_mut};
 use chialisp::compiler::frontend::frontend;
-use chialisp::compiler::sexp::{decode_string, parse_sexp};
 use chialisp::compiler::sexp;
+use chialisp::compiler::sexp::{decode_string, parse_sexp};
 use chialisp::compiler::srcloc::Srcloc;
 
 use crate::relabel::relabel;
 use crate::sexp_trait::{CreateChialispSExp, RcSExp, SrclocWrap};
 
-pub mod sexp_trait;
 pub mod relabel;
+pub mod sexp_trait;
 
 #[cfg(test)]
 pub mod tests;
@@ -48,7 +48,7 @@ pub fn compile(
     let mut parse_input = HashMap::new();
     parse_input.insert(
         "path_or_code".to_string(),
-        ArgumentValue::ArgString(Some(filename.to_string()), program.to_string())
+        ArgumentValue::ArgString(Some(filename.to_string()), program.to_string()),
     );
     let compile_input = RunAndCompileInputData::new(allocator, &parse_input)?;
 
@@ -69,59 +69,64 @@ pub fn compile(
         .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
         .collect();
 
-    let compiled =
-        if compile_input.dialect.stepping.is_some() {
-            let compiled = compile_file(allocator, runner, opts.clone(), program, &mut symbol_table)
-                .map_err(|e| format!("{e:?}"))?
-                .to_sexp();
-            build_symbol_table_mut(&mut symbol_table, &compiled);
-            compiled.into()
-        } else {
-            let run_script = stages::run(allocator);
-            let special_runner = run_program_for_search_paths(
-                &compile_input.use_filename(),
-                &compile_input.search_paths,
-                true,
-                if compile_input.dialect.extra_numeric_constants {
-                    NEW_BIT_CONSTANTS
-                } else {
-                    0
-                },
-            );
-            let dpr = special_runner.clone();
-            let input_sexp = allocator
-                .new_pair(compile_input.program.parsed, compile_input.args.parsed)
-                .map_err(|e| format!("failed to compose compile input: {e:?}"))?;
-            let compiled = special_runner.run_program(
-                allocator,
-                run_script,
-                input_sexp,
-                None,
-            ).map(|pr| pr.1).map_err(|e| format!("failed to compile {filename}: {e:?}"))?;
-            symbol_table = dpr.get_compiles();
+    let compiled = if compile_input.dialect.stepping.is_some() {
+        let compiled = compile_file(allocator, runner, opts.clone(), program, &mut symbol_table)
+            .map_err(|e| format!("{e:?}"))?
+            .to_sexp();
+        build_symbol_table_mut(&mut symbol_table, &compiled);
+        compiled.into()
+    } else {
+        let run_script = stages::run(allocator);
+        let special_runner = run_program_for_search_paths(
+            &compile_input.use_filename(),
+            &compile_input.search_paths,
+            true,
+            if compile_input.dialect.extra_numeric_constants {
+                NEW_BIT_CONSTANTS
+            } else {
+                0
+            },
+        );
+        let dpr = special_runner.clone();
+        let input_sexp = allocator
+            .new_pair(compile_input.program.parsed, compile_input.args.parsed)
+            .map_err(|e| format!("failed to compose compile input: {e:?}"))?;
+        let compiled = special_runner
+            .run_program(allocator, run_script, input_sexp, None)
+            .map(|pr| pr.1)
+            .map_err(|e| format!("failed to compile {filename}: {e:?}"))?;
+        symbol_table = dpr.get_compiles();
 
-            let compiled_rc: Rc<sexp::SExp> = convert_from_clvm_rs(
-                allocator,
-                Srcloc::start(filename),
-                compiled
-            ).map_err(|e| format!("error converting clvm data: {e:?}"))?.into();
+        let compiled_rc: Rc<sexp::SExp> =
+            convert_from_clvm_rs(allocator, Srcloc::start(filename), compiled)
+                .map_err(|e| format!("error converting clvm data: {e:?}"))?
+                .into();
 
-            // Build a swap table for taking SExp objects we have line numbers for and
-            // inserting them into the translated code, replacing the unlabeled ones.
-            let mut swap_table = HashMap::new();
-            build_swap_table_mut(&mut swap_table, &compiled_rc);
-            let entries_to_replace: Vec<_> = swap_table.iter().filter_map(|(hash, sexp)| {
-                if let Some(symbol) = symbol_table.get(hash) && let Some(range) = range_results.get(symbol) && let sexp::SExp::Cons(_, a, b) = &sexp {
-                    return Some((hash.clone(), sexp::SExp::Cons(range.0.clone(), a.clone(), b.clone())));
+        // Build a swap table for taking SExp objects we have line numbers for and
+        // inserting them into the translated code, replacing the unlabeled ones.
+        let mut swap_table = HashMap::new();
+        build_swap_table_mut(&mut swap_table, &compiled_rc);
+        let entries_to_replace: Vec<_> = swap_table
+            .iter()
+            .filter_map(|(hash, sexp)| {
+                if let Some(symbol) = symbol_table.get(hash)
+                    && let Some(range) = range_results.get(symbol)
+                    && let sexp::SExp::Cons(_, a, b) = &sexp
+                {
+                    return Some((
+                        hash.clone(),
+                        sexp::SExp::Cons(range.0.clone(), a.clone(), b.clone()),
+                    ));
                 }
                 None
-            }).collect();
-            for (h, e) in entries_to_replace.into_iter() {
-                swap_table.insert(h, e);
-            }
-            let compiled_rc = Rc::new(relabel(&swap_table, &compiled_rc));
-            compiled_rc
-        };
+            })
+            .collect();
+        for (h, e) in entries_to_replace.into_iter() {
+            swap_table.insert(h, e);
+        }
+        let compiled_rc = Rc::new(relabel(&swap_table, &compiled_rc));
+        compiled_rc
+    };
 
     let symbols = Rc::new(symbol_table);
     let generator = Program::new(

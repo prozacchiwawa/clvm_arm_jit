@@ -26,6 +26,7 @@ fn do_compile(args: &CmdArgs) -> Result<(), String> {
         &mut allocator,
         &args.source,
         &program,
+        &args.output,
         &args.include,
         &args.env
     )?;

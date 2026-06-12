@@ -19,7 +19,7 @@ use crate::compile;
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
     let mut allocator = Allocator::new();
     let search_paths = Vec::new();
-    let compiled = compile(&mut allocator, filename, program, &search_paths, env)?;
+    let compiled = compile(&mut allocator, filename, program, "test.elf", &search_paths, env)?;
     let node_result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,
@@ -35,12 +35,13 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
 fn compile_and_gdb(
     filename: &str,
     program: &str,
+    output: &str,
     env: &str,
     gdb_commands: &[&str],
 ) -> Result<String, String> {
     let mut allocator = Allocator::new();
     let search_paths = Vec::new();
-    let compiled = compile(&mut allocator, filename, program, &search_paths, env)?;
+    let compiled = compile(&mut allocator, filename, program, output, &search_paths, env)?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
     run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands)
 }
@@ -257,6 +258,7 @@ fn test_gdb_breakpoint_on_function_classic() {
     let result = compile_and_gdb(
         "test.clsp",
         "(mod (A)\n  (defun F (X Y) (+ X Y))\n  (F A 3)\n)",
+        "test.elf",
         "(17)",
         &["set confirm off", "break F", "info breakpoints", "quit"],
     )

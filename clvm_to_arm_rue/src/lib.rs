@@ -1558,7 +1558,7 @@ fn add_function_symbol_metadata(
     let mut key = format!("{hash}_arguments");
     symbol_table.insert(key, arguments.to_string());
     key = format!("{hash}_left_env");
-    symbol_table.insert(key, "0".to_string());
+    symbol_table.insert(key, "()".to_string());
 }
 
 struct RueCompileOutput {

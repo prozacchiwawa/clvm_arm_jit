@@ -27,7 +27,6 @@ pub const TARGET_ADDR: u32 = 0x1000;
 
 pub struct ElfObject {
     pub object_file: Vec<u8>,
-    pub synthetic_source: String,
 }
 
 //
@@ -414,12 +413,12 @@ impl<C: CreateSExp> Program<C> {
 
             if let Some(quoted_code) = dequote(lst[0].clone()) {
                 // Short circuit by reading out the quoted code and running it.
-                self.add(quoted_code.clone());
+                let quoted = self.add(quoted_code.clone());
 
                 for i in &[
                     Instr::Addi(Register::R(7), Register::R(4), 0),
                     Instr::Addi(Register::R(0), Register::R(7), 0),
-                    Instr::Bl(quoted_code.to_string()),
+                    Instr::Bl(quoted),
                 ] {
                     self.push(source_sexp.clone(), loc, i.clone());
                 }
@@ -625,11 +624,7 @@ impl<C: CreateSExp> Program<C> {
         }
 
         // Note: get_code_label issues a fresh label for this hash every time.
-        let generated_body_label = self.get_code_label(&hash);
-        let body_label = self
-            .get_renamed_function_label(&hash)
-            .filter(|label| !self.label_is_taken(label))
-            .unwrap_or(generated_body_label);
+        let body_label = self.get_code_label(&hash);
 
         self.code_to_hash
             .insert(sexp.to_string(), body_label.clone());
@@ -762,14 +757,15 @@ impl<C: CreateSExp> Program<C> {
                 }
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
-                        return self.load_atom(
+                        self.load_atom(
                             sexp.clone(),
                             &creator.loc(sexp.clone()),
                             &hash,
                             &[],
-                        );
+                        )
+                    } else {
+                        self.env_select(sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
                     }
-                    self.env_select(sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
                 }
             }
 
@@ -960,39 +956,7 @@ impl<C: CreateSExp> Program<C> {
         Ok(())
     }
 
-    fn mutate_insn_with_functions(&self, i: &Instr) -> Instr {
-        let name_to_replace = match i {
-            Instr::B(l) | Instr::Bl(l) | Instr::Addr(l, _) | Instr::Globl(l) | Instr::Label(l) => {
-                Some(l)
-            }
-            _ => None,
-        };
-
-        let potential_rename = name_to_replace.and_then(|name| self.function_symbols.get(name));
-        let chosen_rename = potential_rename.and_then(|name| self.defined_with_name.get(name));
-
-        // Not the rename we chose.
-        if chosen_rename != name_to_replace {
-            return i.clone();
-        }
-
-        if let Some(new_name) = potential_rename.cloned() {
-            let new_name = format!("_$_{new_name}");
-            return match i {
-                Instr::Globl(_) => Instr::Globl(new_name),
-                Instr::Label(_) => Instr::Label(new_name),
-                Instr::B(_) => Instr::B(new_name),
-                Instr::Bl(_) => Instr::Bl(new_name),
-                Instr::Addr(_, v) => Instr::Addr(new_name, *v),
-                _ => i.clone(),
-            };
-        }
-
-        i.clone()
-    }
-
     pub fn to_elf(&self, output: &str) -> Result<ElfObject, String> {
-        let synthetic_source = self.dwarf_builder.synthetic_source();
         let mut sections = Vec::new();
         let mut obj = ArtifactBuilder::new(triple!("arm-unknown-unknown-unknown-elf"))
             .name(output.to_owned())
@@ -1006,7 +970,6 @@ impl<C: CreateSExp> Program<C> {
             .finished_insns
             .iter()
             .filter_map(|i| {
-                let i = self.mutate_insn_with_functions(i);
                 if let Instr::Section(name) = i {
                     if name.starts_with(".debug") || name.starts_with(".eh") {
                         waiting_for_debug_info = Some(name.clone());
@@ -1069,14 +1032,13 @@ impl<C: CreateSExp> Program<C> {
             };
 
         for i in self.finished_insns.iter() {
-            let insn_with_function_names = self.mutate_insn_with_functions(i);
-            if let Instr::Globl(name) = &insn_with_function_names {
+            if let Instr::Globl(name) = &i {
                 handle_def_end(&mut function_body, &mut in_function)?;
                 in_function = Some(name.to_string());
             }
 
             if let Some(f) = in_function.as_ref() {
-                insn_with_function_names.encode(&mut function_body, &mut relocations, f);
+                i.encode(&mut function_body, &mut relocations, f);
             }
         }
 
@@ -1131,7 +1093,6 @@ impl<C: CreateSExp> Program<C> {
 
         Ok(ElfObject {
             object_file: result_buf,
-            synthetic_source,
         })
     }
 
@@ -1180,7 +1141,7 @@ impl<C: CreateSExp> Program<C> {
             .collect();
 
         let dwarf_builder =
-            DwarfBuilder::new(filename, elf_output, target_addr, symbol_table.clone());
+            DwarfBuilder::new(filename, target_addr, symbol_table.clone());
         let mut p: Program<C> = Program {
             finished_insns: Vec::new(),
             first_label: Default::default(),
@@ -1213,7 +1174,9 @@ impl<C: CreateSExp> Program<C> {
         p.first_label = p.add(sexp.clone());
         p.start_insns(creator);
         p.env_label = p.add_sexp(&envhash, env);
-        p.emit_waiting(creator);
+        while !p.waiting_programs.is_empty() {
+            p.emit_waiting(creator);
+        }
         p.finish_insns(creator)?;
         Ok(p)
     }

@@ -18,7 +18,7 @@ pub fn run_gdb(
     gdb_commands: &[&str],
 ) -> Result<String, String> {
     let elf_out = NamedTempFile::new().unwrap();
-    elf_out.as_file().write(&object.object_file).unwrap();
+    elf_out.as_file().write_all(&object.object_file).unwrap();
     let (gdb_remote_sender, gdb_remote_receiver) = mpsc::channel();
     let symbols_ref: &HashMap<String, String> = &symbols;
     let symbols_copy = symbols_ref.clone();

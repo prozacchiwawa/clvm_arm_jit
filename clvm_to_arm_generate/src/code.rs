@@ -1498,15 +1498,14 @@ impl<C: CreateSExp> Program<C> {
         format!("_{}_{n}", hexify(hash))
     }
 
-    fn do_throw(&mut self, creator: &mut C, source_sexp: C::S, loc: &C::SL, hash: &[u8]) {
-        self.load_atom(creator, source_sexp.clone(), loc, hash, hash);
+    fn do_throw(&mut self, source_sexp: C::S, loc: &C::SL, hash: &[u8]) {
+        self.load_atom(source_sexp.clone(), loc, hash, hash);
         self.push(
-            creator,
             source_sexp.clone(),
             loc,
             Instr::Swi(SWI_PRINT_EXPR),
         );
-        self.push(creator, source_sexp, loc, Instr::Swi(SWI_THROW));
+        self.push(source_sexp, loc, Instr::Swi(SWI_THROW));
     }
 
     fn add_sexp(&mut self, hash: &[u8], s: C::S) -> String {
@@ -1535,14 +1534,13 @@ impl<C: CreateSExp> Program<C> {
         }
     }
 
-    fn load_sexp(&mut self, creator: &mut C, source_sexp: C::S, loc: &C::SL, hash: &[u8], s: C::S) {
+    fn load_sexp(&mut self, source_sexp: C::S, loc: &C::SL, hash: &[u8], s: C::S) {
         let label = self.add_sexp(hash, s);
-        self.push(creator, source_sexp, loc, Instr::Lea(Register::R(0), label));
+        self.push(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
     fn first_rest(
         &mut self,
-        creator: &mut C,
         source_sexp: C::S,
         loc: &C::SL,
         hash: &[u8],
@@ -1550,10 +1548,10 @@ impl<C: CreateSExp> Program<C> {
         offset: i32,
     ) {
         if lst.len() != 1 {
-            return self.do_throw(creator, source_sexp, loc, hash);
+            return self.do_throw(source_sexp, loc, hash);
         }
 
-        let subexp = self.add(source_sexp.clone(), lst[0].clone());
+        let subexp = self.add(lst[0].clone());
         for i in &[
             Instr::Addi(Register::R(0), Register::R(7), 0),
             // Determine if the result is a cons.
@@ -1566,7 +1564,7 @@ impl<C: CreateSExp> Program<C> {
             Instr::SwiEq(SWI_THROW),
             Instr::Ldr(Register::R(0), Register::R(0), offset),
         ] {
-            self.push(creator, source_sexp.clone(), loc, i.clone());
+            self.push(source_sexp.clone(), loc, i.clone());
         }
     }
 
@@ -1586,51 +1584,51 @@ impl<C: CreateSExp> Program<C> {
         }
 
         if a == b"" {
-            return self.do_throw(creator, source_sexp, loc, hash);
+            return self.do_throw(source_sexp, loc, hash);
         }
 
         // Quote is special.
         if a == [1] {
-            self.add(source_sexp.clone(), b.clone());
+            self.add(b.clone());
             let b_hash = b.sha256tree();
-            return self.load_sexp(creator, b.clone(), loc, &b_hash, b);
+            return self.load_sexp(b.clone(), loc, &b_hash, b);
         }
 
         // Every other operator must have a proper list following it.
         let lst = if let Some(lst) = b.proper_list() {
             lst
         } else {
-            return self.do_throw(creator, source_sexp, loc, hash);
+            return self.do_throw(source_sexp, loc, hash);
         };
 
         if a == [2] {
             // Apply operator
             if lst.len() != 2 {
-                return self.do_throw(creator, source_sexp, loc, hash);
+                return self.do_throw(source_sexp, loc, hash);
             }
 
-            let env_comp = self.add(source_sexp.clone(), lst[1].clone());
+            let env_comp = self.add(lst[1].clone());
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
                 Instr::Bl(env_comp),
                 Instr::Addi(Register::R(4), Register::R(0), 0),
             ] {
-                self.push(creator, source_sexp.clone(), loc, i.clone());
+                self.push(source_sexp.clone(), loc, i.clone());
             }
 
             if let Some(quoted_code) = dequote(lst[0].clone()) {
                 // Short circuit by reading out the quoted code and running it.
-                self.add(lst[0].clone(), quoted_code.clone());
+                self.add(quoted_code.clone());
 
                 for i in &[
                     Instr::Addi(Register::R(7), Register::R(4), 0),
                     Instr::Addi(Register::R(0), Register::R(7), 0),
                     Instr::Bl(quoted_code.to_string()),
                 ] {
-                    self.push(creator, source_sexp.clone(), loc, i.clone());
+                    self.push(source_sexp.clone(), loc, i.clone());
                 }
             } else {
-                let code_comp = self.add(source_sexp.clone(), lst[0].clone());
+                let code_comp = self.add(lst[0].clone());
 
                 for i in &[
                     Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1639,12 +1637,11 @@ impl<C: CreateSExp> Program<C> {
                     Instr::Swi(SWI_DISPATCH_NEW_CODE),
                     Instr::Bx(Register::R(1)),
                 ] {
-                    self.push(creator, source_sexp.clone(), loc, i.clone());
+                    self.push(source_sexp.clone(), loc, i.clone());
                 }
             }
 
             self.push(
-                creator,
                 source_sexp.clone(),
                 loc,
                 Instr::Ldr(Register::R(7), Register::SP, 12),
@@ -1652,12 +1649,12 @@ impl<C: CreateSExp> Program<C> {
         } else if a == [3] {
             // If operator
             if lst.len() != 3 {
-                return self.do_throw(creator, source_sexp, loc, hash);
+                return self.do_throw(source_sexp, loc, hash);
             }
 
-            let else_clause = self.add(source_sexp.clone(), lst[2].clone());
-            let then_clause = self.add(source_sexp.clone(), lst[1].clone());
-            let cond_clause = self.add(source_sexp.clone(), lst[0].clone());
+            let else_clause = self.add(lst[2].clone());
+            let then_clause = self.add(lst[1].clone());
+            let cond_clause = self.add(lst[0].clone());
 
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1675,16 +1672,16 @@ impl<C: CreateSExp> Program<C> {
                 Instr::AddiEq(Register::R(4), Register::R(6), 0),
                 Instr::Addi(Register::R(0), Register::R(4), 0),
             ] {
-                self.push(creator, source_sexp.clone(), loc, i.clone());
+                self.push(source_sexp.clone(), loc, i.clone());
             }
         } else if a == [4] {
             // Cons operator
             if lst.len() != 2 {
-                return self.do_throw(creator, source_sexp, loc, hash);
+                return self.do_throw(source_sexp, loc, hash);
             }
 
-            let rest_label = self.add(source_sexp.clone(), lst[1].clone());
-            let first_label = self.add(source_sexp.clone(), lst[0].clone());
+            let rest_label = self.add(lst[1].clone());
+            let first_label = self.add(lst[0].clone());
 
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1703,12 +1700,12 @@ impl<C: CreateSExp> Program<C> {
                 // Move the result to r0
                 Instr::Addi(Register::R(0), Register::R(1), 0),
             ] {
-                self.push(creator, source_sexp.clone(), loc, i.clone());
+                self.push(source_sexp.clone(), loc, i.clone());
             }
         } else if a == [5] {
-            self.first_rest(creator, source_sexp, loc, hash, &lst, 0)
+            self.first_rest(source_sexp, loc, hash, &lst, 0)
         } else if a == [6] {
-            self.first_rest(creator, source_sexp, loc, hash, &lst, 4)
+            self.first_rest(source_sexp, loc, hash, &lst, 4)
         } else {
             // Ensure we have this sexp loadable as data.
             let operator_sexp = creator.atom(loc.clone(), a);
@@ -1717,7 +1714,6 @@ impl<C: CreateSExp> Program<C> {
 
             // Load a nil into R4.
             self.push(
-                creator,
                 source_sexp.clone(),
                 loc,
                 Instr::Andi(Register::R(4), Register::R(4), 0),
@@ -1725,7 +1721,7 @@ impl<C: CreateSExp> Program<C> {
 
             // For each subexpression, call it and replace R4 with (cons R0 R4)
             for item in lst.iter().rev() {
-                let clause_label = self.add(source_sexp.clone(), item.clone());
+                let clause_label = self.add(item.clone());
                 for i in &[
                     // Load the allocator ptr into R0.
                     Instr::Ldr(Register::R(0), Register::R(5), NEXT_ALLOC_OFFSET),
@@ -1746,7 +1742,7 @@ impl<C: CreateSExp> Program<C> {
                     // Replace R4 with R6 (the new cons)
                     Instr::Addi(Register::R(4), Register::R(6), 0),
                 ] {
-                    self.push(creator, source_sexp.clone(), loc, i.clone());
+                    self.push(source_sexp.clone(), loc, i.clone());
                 }
             }
 
@@ -1758,7 +1754,7 @@ impl<C: CreateSExp> Program<C> {
                 // Call to do the operator.
                 Instr::Swi(SWI_DISPATCH_INSTRUCTION),
             ] {
-                self.push(creator, source_sexp.clone(), loc, i.clone());
+                self.push(source_sexp.clone(), loc, i.clone());
             }
         }
     }
@@ -1766,20 +1762,18 @@ impl<C: CreateSExp> Program<C> {
     // R0 = the address of the env block.
     fn env_select(
         &mut self,
-        creator: &mut C,
         source_sexp: C::S,
         loc: &C::SL,
         hash: &[u8],
         v: &[u8],
     ) {
         if v.is_empty() {
-            self.load_atom(creator, source_sexp, loc, hash, v);
+            self.load_atom(source_sexp, loc, hash, v);
             return;
         }
 
         // Let r0 be our pointer.
         self.push(
-            creator,
             source_sexp.clone(),
             loc,
             Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1811,7 +1805,7 @@ impl<C: CreateSExp> Program<C> {
                         // Load if it was a cons.
                         Instr::Ldr(Register::R(0), Register::R(0), offset),
                     ] {
-                        self.push(creator, source_sexp.clone(), loc, i.clone());
+                        self.push(source_sexp.clone(), loc, i.clone());
                     }
                 }
             }
@@ -1831,17 +1825,16 @@ impl<C: CreateSExp> Program<C> {
 
     fn load_atom(
         &mut self,
-        creator: &mut C,
         source_sexp: C::S,
         loc: &C::SL,
         hash: &[u8],
         v: &[u8],
     ) {
         let label = self.add_atom(hash, v);
-        self.push(creator, source_sexp, loc, Instr::Lea(Register::R(0), label));
+        self.push(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn add(&mut self, parent: C::S, sexp: C::S) -> String {
+    fn add(&mut self, sexp: C::S) -> String {
         let hash = sexp.sha256tree();
         if let Some(existing_label) = self.labels_by_hash.get(&hash) {
             return existing_label.clone();
@@ -1864,7 +1857,6 @@ impl<C: CreateSExp> Program<C> {
 
     fn push_be(
         &mut self,
-        creator: &mut C,
         source_sexp: C::S,
         srcloc: &C::SL,
         instr: Instr,
@@ -1898,8 +1890,8 @@ impl<C: CreateSExp> Program<C> {
         }
     }
 
-    fn push(&mut self, creator: &mut C, source_sexp: C::S, srcloc: &C::SL, instr: Instr) {
-        self.push_be(creator, source_sexp, srcloc, instr, None);
+    fn push(&mut self, source_sexp: C::S, srcloc: &C::SL, instr: Instr) {
+        self.push_be(source_sexp, srcloc, instr, None);
     }
 
     fn emit_waiting(&mut self, creator: &mut C) {
@@ -1912,23 +1904,18 @@ impl<C: CreateSExp> Program<C> {
 
             self.dwarf_builder.start(self.current_addr);
 
-            let pstart = self.finished_insns.len();
-
             self.push(
-                creator,
                 sexp.clone(),
                 &creator.loc(sexp.clone()),
                 Instr::Globl(label.clone()),
             );
             self.push(
-                creator,
                 sexp.clone(),
                 &creator.loc(sexp.clone()),
                 Instr::Label(label.clone()),
             );
 
             self.push_be(
-                creator,
                 sexp.clone(),
                 &creator.loc(sexp.clone()),
                 Instr::Push(vec![Register::FP, Register::LR]),
@@ -1943,11 +1930,10 @@ impl<C: CreateSExp> Program<C> {
                 Instr::Str(Register::R(7), Register::SP, 12),
                 Instr::Addi(Register::R(7), Register::R(0), 0),
             ] {
-                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
+                self.push(sexp.clone(), &creator.loc(sexp.clone()), i.clone());
             }
 
             self.push_be(
-                creator,
                 sexp.clone(),
                 &creator.loc(sexp.clone()),
                 // Insert a nop we can land on before translating any interior expression.
@@ -1984,11 +1970,10 @@ impl<C: CreateSExp> Program<C> {
                         );
                     } else {
                         // invalid head form, just throw.
-                        self.do_throw(creator, sexp.clone(), &creator.loc(sexp.clone()), &hash);
+                        self.do_throw(sexp.clone(), &creator.loc(sexp.clone()), &hash);
                     }
                 }
                 SExpValue::Nil => self.load_atom(
-                    creator,
                     sexp.clone(),
                     &creator.loc(sexp.clone()),
                     &hash,
@@ -1997,14 +1982,13 @@ impl<C: CreateSExp> Program<C> {
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
                         return self.load_atom(
-                            creator,
                             sexp.clone(),
                             &creator.loc(sexp.clone()),
                             &hash,
                             &[],
                         );
                     }
-                    self.env_select(creator, sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
+                    self.env_select(sexp.clone(), &creator.loc(sexp.clone()), &hash, &v);
                 }
             }
 
@@ -2016,11 +2000,10 @@ impl<C: CreateSExp> Program<C> {
                 Instr::Subi(Register::SP, Register::FP, 4),
                 Instr::Pop(vec![Register::FP, Register::LR]),
             ] {
-                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
+                self.push(sexp.clone(), &creator.loc(sexp.clone()), i.clone());
             }
 
             self.push_be(
-                creator,
                 sexp.clone(),
                 &creator.loc(sexp.clone()),
                 Instr::Bx(Register::LR),
@@ -2052,11 +2035,10 @@ impl<C: CreateSExp> Program<C> {
             Instr::Globl("_start".to_string()),
             Instr::Label("_start".to_string()),
         ] {
-            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+            self.push(source_sexp.clone(), &srcloc, i.clone());
         }
 
         self.push_be(
-            creator,
             source_sexp.clone(),
             &srcloc,
             Instr::Push(vec![Register::FP, Register::LR]),
@@ -2080,7 +2062,6 @@ impl<C: CreateSExp> Program<C> {
             Instr::Swi(SWI_DONE),
         ] {
             self.push(
-                creator,
                 source_sexp.clone(),
                 &creator.loc(source_sexp.clone()),
                 i.clone(),
@@ -2098,7 +2079,6 @@ impl<C: CreateSExp> Program<C> {
             Instr::Pop(vec![Register::FP, Register::LR]),
         ] {
             self.push(
-                creator,
                 source_sexp.clone(),
                 &creator.loc(source_sexp.clone()),
                 i.clone(),
@@ -2106,7 +2086,6 @@ impl<C: CreateSExp> Program<C> {
         }
 
         self.push_be(
-            creator,
             source_sexp.clone(),
             &creator.loc(source_sexp.clone()),
             Instr::Bx(Register::LR),
@@ -2132,7 +2111,7 @@ impl<C: CreateSExp> Program<C> {
         ]
         .iter()
         {
-            self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+            self.push(source_sexp.clone(), &srcloc, i.clone());
         }
 
         for (_, c) in constants.iter() {
@@ -2145,7 +2124,7 @@ impl<C: CreateSExp> Program<C> {
                         Instr::Addr(a_label.clone(), false),
                         Instr::Addr(b_label.clone(), false),
                     ] {
-                        self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+                        self.push(source_sexp.clone(), &srcloc, i.clone());
                     }
                 }
                 Constant::Atom(label, bytes) => {
@@ -2156,44 +2135,12 @@ impl<C: CreateSExp> Program<C> {
                         Instr::Long(bytes.len() * 2 + 1),
                         Instr::Bytes(bytes.clone()),
                     ] {
-                        self.push(creator, source_sexp.clone(), &srcloc, i.clone());
+                        self.push(source_sexp.clone(), &srcloc, i.clone());
                     }
                 }
             }
         }
         swap(&mut constants, &mut self.constants);
-
-        // Capture mappings from function symbols to names (one per target).
-        for i in self.finished_insns.iter() {
-            if let Instr::Globl(defname) = i {
-                // XXX When a bare symbol exists with no other information that
-                // XXX matches the looked-up name, gdb can set a breakpoint in
-                // XXX the containing block, which is the whole compilation unit
-                // XXX in this case.  Revisit this when we know how to mark up
-                // XXX the named symbol properly.
-                if let Some(funname) = self.function_symbols.get(defname) {
-                    self.defined_with_name
-                        .insert(format!("_$_{funname}"), defname.clone());
-                }
-
-                let start = if defname.starts_with("_$_") {
-                    Some(3)
-                } else if defname.starts_with("_") {
-                    Some(1)
-                } else {
-                    None
-                };
-                if let Some(start) = start {
-                    if defname.len() >= start + 64 {
-                        let stripped_symbol = &defname[start..(start + 64)];
-                        if let Some(funname) = self.symbol_table.get(stripped_symbol) {
-                            self.defined_with_name
-                                .insert(funname.clone(), funname.clone());
-                        }
-                    }
-                }
-            }
-        }
 
         self.dwarf_builder
             .write(self.current_addr, &mut self.finished_insns)
@@ -2452,7 +2399,7 @@ impl<C: CreateSExp> Program<C> {
                 .insert(remap_hash_hex.clone(), name.clone());
             p.add_sexp(&remap_hash, remap_sexp.clone());
         }
-        p.first_label = p.add(sexp.clone(), sexp.clone());
+        p.first_label = p.add(sexp.clone());
         p.start_insns(creator);
         p.env_label = p.add_sexp(&envhash, env);
         p.emit_waiting(creator);

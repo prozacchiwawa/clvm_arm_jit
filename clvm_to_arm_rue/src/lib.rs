@@ -1558,7 +1558,7 @@ fn add_function_symbol_metadata(
     let mut key = format!("{hash}_arguments");
     symbol_table.insert(key, arguments.to_string());
     key = format!("{hash}_left_env");
-    symbol_table.insert(key, "0".to_string());
+    symbol_table.insert(key, "()".to_string());
 }
 
 struct RueCompileOutput {
@@ -1809,7 +1809,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         &mut creator,
         output.srclocs,
         &args.filename,
-        &args.output,
         output.program,
         rue_env,
         TARGET_ADDR,

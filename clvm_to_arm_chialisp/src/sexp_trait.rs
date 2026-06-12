@@ -65,7 +65,7 @@ impl sexp::SExp for RcSExp {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SrclocWrap(pub Srcloc);
 
 impl std::fmt::Display for SrclocWrap {

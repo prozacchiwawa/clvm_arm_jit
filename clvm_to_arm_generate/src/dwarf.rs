@@ -1,9 +1,6 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
-
-use sha2::{Digest, Sha256};
 
 use crate::arm::{BeginEndBlock, Instr};
 use crate::sexp::{CreateSExp, Number, SExp, SExpValue, Srcloc, bi_one, bi_zero};
@@ -33,10 +30,6 @@ pub struct DwarfBuilder {
     unit_id: UnitId,
     file_to_id: HashMap<Vec<u8>, (DirectoryId, FileId)>,
     directory_to_id: HashMap<Vec<u8>, DirectoryId>,
-    synthetic_source_path: String,
-    synthetic_file_id: Option<FileId>,
-    synthetic_source_lines: Vec<String>,
-    synthetic_expr_line_by_key: HashMap<Vec<u8>, u64>,
     pointer_type: UnitEntryId,
     u32_type: UnitEntryId,
 
@@ -106,7 +99,6 @@ impl gimli::write::Writer for DwarfSectionWriter {
 impl DwarfBuilder {
     pub fn new(
         filename: &str,
-        elf_output: &str,
         target_addr: u32,
         symbol_table: Rc<HashMap<String, String>>,
     ) -> Self {
@@ -192,10 +184,6 @@ impl DwarfBuilder {
             unit_id,
             file_to_id,
             directory_to_id,
-            synthetic_source_path: format!("{elf_output}.clsp"),
-            synthetic_file_id: None,
-            synthetic_source_lines: Vec::new(),
-            synthetic_expr_line_by_key: HashMap::new(),
             pointer_type: type_id,
             u32_type: base_type_id,
             symbol_table,
@@ -213,10 +201,6 @@ impl DwarfBuilder {
         let mut cie = CommonInformationEntry::new(cfi_encoding, 1, -4, Arm::R14);
         cie.add_instruction(CallFrameInstruction::Cfa(Arm::R13, 0));
         obj.cfi_cie_id = Some(obj.frame_table.add_cie(cie));
-
-        let synthetic_source_path = obj.synthetic_source_path.clone();
-        let (_, synthetic_file_id) = obj.add_file(&synthetic_source_path);
-        obj.synthetic_file_id = Some(synthetic_file_id);
 
         obj
     }
@@ -266,57 +250,10 @@ impl DwarfBuilder {
         self.add_file_having_dirid(dirid, &filename)
     }
 
-    fn synthetic_expr_key<C: CreateSExp>(loc: &C::SL, source_sexp: &impl fmt::Display) -> Vec<u8> {
-        let mut hasher = Sha256::new();
-        hasher.update(loc.filename().as_bytes());
-        hasher.update((loc.line() as u64).to_le_bytes());
-        hasher.update((loc.col() as u64).to_le_bytes());
-        if let Some(until) = loc.until() {
-            hasher.update((until.line as u64).to_le_bytes());
-            hasher.update((until.col as u64).to_le_bytes());
-        }
-        hasher.update(source_sexp.to_string().as_bytes());
-        hasher.finalize().to_vec()
-    }
-
-    fn add_synthetic_line<C: CreateSExp>(
-        &mut self,
-        loc: &C::SL,
-        source_sexp: &impl fmt::Display,
-    ) -> u64 {
-        let synthetic_key = Self::synthetic_expr_key::<C>(loc, source_sexp);
-        if let Some(line) = self.synthetic_expr_line_by_key.get(&synthetic_key) {
-            return *line;
-        }
-
-        const MAX_SYNTHETIC_EXPR_CHARS: usize = 220;
-        let expression = source_sexp.to_string();
-        let truncated: String = expression.chars().take(MAX_SYNTHETIC_EXPR_CHARS).collect();
-        let display_expr = if expression.chars().count() > MAX_SYNTHETIC_EXPR_CHARS {
-            format!("{truncated}...")
-        } else {
-            truncated
-        };
-        self.synthetic_source_lines
-            .push(format!("{loc} => {display_expr}"));
-        let line = self.synthetic_source_lines.len() as u64;
-        self.synthetic_expr_line_by_key.insert(synthetic_key, line);
-        line
-    }
-
-    pub fn synthetic_source(&self) -> String {
-        let mut synthetic_source = self.synthetic_source_lines.join("\n");
-        if !synthetic_source.is_empty() {
-            synthetic_source.push('\n');
-        }
-        synthetic_source
-    }
-
     pub fn add_instr<C: CreateSExp>(
         &mut self,
         addr: usize,
         loc: &C::SL,
-        source_sexp: &impl fmt::Display,
         instr: Instr,
         begin_end_block: Option<BeginEndBlock>,
     ) {
@@ -331,20 +268,9 @@ impl DwarfBuilder {
         }
 
         let source_file = loc.filename();
-        let synthetic_file_id = self
-            .synthetic_file_id
-            .expect("synthetic source file registered");
-        let using_synthetic_file = loc.filename().starts_with('*');
-        let (file_id, line, col) = if using_synthetic_file {
-            (
-                synthetic_file_id,
-                self.add_synthetic_line::<C>(loc, source_sexp),
-                1_u64,
-            )
-        } else {
-            let (_, file_id) = self.add_file(&loc.filename());
-            (file_id, loc.line() as u64, loc.col() as u64)
-        };
+        let (_, file_id) = self.add_file(&loc.filename());
+        let line = loc.line() as u64;
+        let col = loc.col() as u64;
 
         // Figure out whether the source changed.
         let source_changed = if let Some(last) = self.last_row_source.as_ref() {
@@ -449,7 +375,7 @@ impl DwarfBuilder {
                 .get(&String::from_utf8_lossy(&left_stripped).to_string())
                 .cloned()
             {
-                res == "1"
+                res != "0" && res != "()"
             } else {
                 false
             };

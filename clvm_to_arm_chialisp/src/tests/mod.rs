@@ -104,6 +104,7 @@ fn compile_and_gdb(
 ) -> Result<String, String> {
     let mut allocator = Allocator::new();
     let compiled = compile(&mut allocator, filename, program, env)?;
+    std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
     run_gdb(
         compiled.object,
         compiled.symbols.clone(),

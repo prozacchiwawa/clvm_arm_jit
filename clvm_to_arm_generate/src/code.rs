@@ -213,6 +213,7 @@ impl Instr {
 enum BeginEndBlock {
     BeginBlock,
     EndBlock,
+    ForceLine,
 }
 
 pub trait Encodable {
@@ -920,7 +921,7 @@ impl DwarfBuilder {
 
         // Figure out whether the source changed.
         let source_changed = if let Some(last) = self.last_row_source.as_ref() {
-            source_file != last.filename || line != last.line || col != last.col
+            matches!(begin_end_block, Some(BeginEndBlock::ForceLine)) || source_file != last.filename || line != last.line || col != last.col
         } else {
             true
         };
@@ -1936,13 +1937,20 @@ impl<C: CreateSExp> Program<C> {
                 Instr::Str(Register::R(6), Register::SP, 8),
                 Instr::Str(Register::R(7), Register::SP, 12),
                 Instr::Addi(Register::R(7), Register::R(0), 0),
+            ] {
+                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
+            }
+
+            self.push_be(
+                creator,
+                sexp.clone(),
+                &creator.loc(sexp.clone()),
                 // Insert a nop we can land on before translating any interior expression.
                 // This will allow any function or alias to contain an insruction apart from
                 // other code generation for the purpose of breakpoints.
                 Instr::Addi(Register::R(0), Register::R(0), 0),
-            ] {
-                self.push(creator, sexp.clone(), &creator.loc(sexp.clone()), i.clone());
-            }
+                Some(BeginEndBlock::ForceLine),
+            );
 
             // Translate body.
             match sexp.explode() {

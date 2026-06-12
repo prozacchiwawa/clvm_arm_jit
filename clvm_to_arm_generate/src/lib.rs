@@ -2,6 +2,7 @@ pub mod arm;
 pub mod clvmr_node;
 pub mod code;
 pub mod disassemble;
+pub mod dwarf;
 pub mod ir;
 pub mod loader;
 pub mod mem;

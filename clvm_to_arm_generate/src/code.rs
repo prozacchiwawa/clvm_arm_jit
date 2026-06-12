@@ -943,13 +943,11 @@ impl<C: CreateSExp> Program<C> {
                 } else {
                     None
                 };
-                if let Some(start) = start {
-                    if defname.len() >= start + 64 {
-                        let stripped_symbol = &defname[start..(start + 64)];
-                        if let Some(funname) = self.symbol_table.get(stripped_symbol) {
-                            self.defined_with_name
-                                .insert(funname.clone(), funname.clone());
-                        }
+                if let Some(start) = start && defname.len() >= start + 64 {
+                    let stripped_symbol = &defname[start..(start + 64)];
+                    if let Some(funname) = self.symbol_table.get(stripped_symbol) {
+                        self.defined_with_name
+                            .insert(funname.clone(), funname.clone());
                     }
                 }
             }

@@ -3,92 +3,23 @@ use std::fs;
 use std::rc::Rc;
 
 use chialisp::classic::clvm_tools::binutils::disassemble;
-use chialisp::classic::clvm_tools::stages::stage_0::{DefaultProgramRunner, TRunProgram};
 use chialisp::compiler::clvm::convert_from_clvm_rs;
-use chialisp::compiler::compiler::{DefaultCompilerOpts, compile_file};
-use chialisp::compiler::comptypes::CompilerOpts;
-use chialisp::compiler::debug::build_symbol_table_mut;
-use chialisp::compiler::dialect::AcceptedDialect;
-use chialisp::compiler::frontend::frontend;
-use chialisp::compiler::sexp::{SExp, decode_string, parse_sexp};
+use chialisp::compiler::sexp::SExp;
 use chialisp::compiler::srcloc::Srcloc;
 use clvmr::Allocator;
-use tempfile::NamedTempFile;
 
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
-use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::TARGET_ADDR;
 #[cfg(test)]
 use clvm_to_arm_test::run_gdb;
 
-use crate::sexp_trait::{CreateChialispSExp, RcSExp, SrclocWrap};
-
-#[cfg(test)]
-struct CompileResult {
-    object: ElfObject,
-    symbols: Rc<HashMap<String, String>>,
-}
-
-#[cfg(test)]
-fn compile(
-    allocator: &mut Allocator,
-    filename: &str,
-    program: &str,
-    env: &str,
-) -> Result<CompileResult, String> {
-    let srcloc = Srcloc::start(filename);
-    let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).map_err(|e| format!("{e:?}"))?;
-    let mut symbol_table = HashMap::new();
-    let runner: Rc<dyn TRunProgram> = Rc::new(DefaultProgramRunner::new());
-    let search_paths = vec![];
-    let opts = Rc::new(DefaultCompilerOpts::new(filename))
-        .set_dialect(AcceptedDialect {
-            stepping: Some(23),
-            strict: true,
-            int_fix: true,
-            extra_numeric_constants: false,
-        })
-        .set_optimize(true)
-        .set_search_paths(&search_paths)
-        .set_frontend_opt(false);
-
-    let parsed_program = parse_sexp(srcloc.clone(), program.bytes())
-        .map_err(|_e| format!("failed to parse chialisp program {filename}"))?;
-    let fe = frontend(opts.clone(), &parsed_program)
-        .map_err(|_e| format!("failed to compose frontend program"))?;
-    let range_results: HashMap<String, SrclocWrap> = fe
-        .compileform()
-        .helpers
-        .iter()
-        .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
-        .collect();
-
-    let compiled = compile_file(allocator, runner, opts, program, &mut symbol_table)
-        .map_err(|e| format!("{e:?}"))?
-        .to_sexp();
-    build_symbol_table_mut(&mut symbol_table, &compiled);
-    let tmpfile = NamedTempFile::new().map_err(|e| format!("{e:?}"))?;
-    let tmpname = tmpfile.path().to_str().unwrap().to_string();
-    let symbols = Rc::new(symbol_table);
-    let generator = Program::new(
-        &mut CreateChialispSExp,
-        range_results,
-        filename,
-        &tmpname,
-        RcSExp(Rc::new(compiled)),
-        RcSExp(env_parsed[0].clone()),
-        TARGET_ADDR,
-        symbols.clone(),
-    )?;
-    Ok(CompileResult {
-        object: generator.to_elf(&tmpname)?,
-        symbols,
-    })
-}
+use crate::compile;
 
 #[cfg(test)]
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
     let mut allocator = Allocator::new();
-    let compiled = compile(&mut allocator, filename, program, env)?;
+    let search_paths = Vec::new();
+    let compiled = compile(&mut allocator, filename, program, &search_paths, env)?;
     let node_result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,
@@ -108,7 +39,8 @@ fn compile_and_gdb(
     gdb_commands: &[&str],
 ) -> Result<String, String> {
     let mut allocator = Allocator::new();
-    let compiled = compile(&mut allocator, filename, program, env)?;
+    let search_paths = Vec::new();
+    let compiled = compile(&mut allocator, filename, program, &search_paths, env)?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
     run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands)
 }

@@ -1500,11 +1500,7 @@ impl<C: CreateSExp> Program<C> {
 
     fn do_throw(&mut self, source_sexp: C::S, loc: &C::SL, hash: &[u8]) {
         self.load_atom(source_sexp.clone(), loc, hash, hash);
-        self.push(
-            source_sexp.clone(),
-            loc,
-            Instr::Swi(SWI_PRINT_EXPR),
-        );
+        self.push(source_sexp.clone(), loc, Instr::Swi(SWI_PRINT_EXPR));
         self.push(source_sexp, loc, Instr::Swi(SWI_THROW));
     }
 
@@ -1760,13 +1756,7 @@ impl<C: CreateSExp> Program<C> {
     }
 
     // R0 = the address of the env block.
-    fn env_select(
-        &mut self,
-        source_sexp: C::S,
-        loc: &C::SL,
-        hash: &[u8],
-        v: &[u8],
-    ) {
+    fn env_select(&mut self, source_sexp: C::S, loc: &C::SL, hash: &[u8], v: &[u8]) {
         if v.is_empty() {
             self.load_atom(source_sexp, loc, hash, v);
             return;
@@ -1823,13 +1813,7 @@ impl<C: CreateSExp> Program<C> {
         label
     }
 
-    fn load_atom(
-        &mut self,
-        source_sexp: C::S,
-        loc: &C::SL,
-        hash: &[u8],
-        v: &[u8],
-    ) {
+    fn load_atom(&mut self, source_sexp: C::S, loc: &C::SL, hash: &[u8], v: &[u8]) {
         let label = self.add_atom(hash, v);
         self.push(source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
@@ -1973,12 +1957,9 @@ impl<C: CreateSExp> Program<C> {
                         self.do_throw(sexp.clone(), &creator.loc(sexp.clone()), &hash);
                     }
                 }
-                SExpValue::Nil => self.load_atom(
-                    sexp.clone(),
-                    &creator.loc(sexp.clone()),
-                    &hash,
-                    &[],
-                ),
+                SExpValue::Nil => {
+                    self.load_atom(sexp.clone(), &creator.loc(sexp.clone()), &hash, &[])
+                }
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
                         return self.load_atom(

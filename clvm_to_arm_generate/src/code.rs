@@ -282,11 +282,13 @@ fn choose_location<C: CreateSExp>(
 ) -> (C::S, C::SL) {
     let this_loc = creator.loc(sexp.clone());
     let filename = this_loc.filename();
-    let last_component_offset = filename.find('/').map(|a| a+1).unwrap_or(0);
+    let last_component_offset = filename.find('/').map(|a| a + 1).unwrap_or(0);
     let last_component = filename[last_component_offset..].to_string();
     eprintln!("last_component {last_component}");
 
-    if last_component.starts_with("*") && let Some(next) = parent {
+    if last_component.starts_with("*")
+        && let Some(next) = parent
+    {
         return choose_location(creator, next.sexp.clone(), next.parent.clone());
     }
 
@@ -655,12 +657,11 @@ impl<C: CreateSExp> Program<C> {
         self.code_to_hash
             .insert(sexp.to_string(), body_label.clone());
         self.labels_by_hash.insert(hash, body_label.clone());
-        self.waiting_programs
-            .push(Rc::new(WaitingProgram {
-                parent,
-                label: body_label.clone(),
-                sexp: sexp.clone()
-            }));
+        self.waiting_programs.push(Rc::new(WaitingProgram {
+            parent,
+            label: body_label.clone(),
+            sexp: sexp.clone(),
+        }));
         body_label
     }
 
@@ -709,7 +710,8 @@ impl<C: CreateSExp> Program<C> {
             let label = waiting.label.clone();
             let sexp = waiting.sexp.clone();
             let hash = sexp.sha256tree();
-            let (anchor_sexp, location) = choose_location(creator, sexp.clone(), waiting.parent.clone());
+            let (anchor_sexp, location) =
+                choose_location(creator, sexp.clone(), waiting.parent.clone());
 
             self.labels_by_hash.insert(hash.clone(), label.clone());
             self.current_symbol = label.clone();
@@ -717,16 +719,8 @@ impl<C: CreateSExp> Program<C> {
 
             self.dwarf_builder.start(self.current_addr);
 
-            self.push(
-                sexp.clone(),
-                &location,
-                Instr::Globl(label.clone()),
-            );
-            self.push(
-                sexp.clone(),
-                &location,
-                Instr::Label(label.clone()),
-            );
+            self.push(sexp.clone(), &location, Instr::Globl(label.clone()));
+            self.push(sexp.clone(), &location, Instr::Label(label.clone()));
 
             self.push_be(
                 sexp.clone(),
@@ -788,9 +782,7 @@ impl<C: CreateSExp> Program<C> {
                         self.do_throw(sexp.clone(), &location, &hash);
                     }
                 }
-                SExpValue::Nil => {
-                    self.load_atom(sexp.clone(), &location, &hash, &[])
-                }
+                SExpValue::Nil => self.load_atom(sexp.clone(), &location, &hash, &[]),
                 SExpValue::Atom(v) => {
                     if v.is_empty() {
                         self.load_atom(sexp.clone(), &location, &hash, &[])

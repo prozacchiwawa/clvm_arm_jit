@@ -1809,7 +1809,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         &mut creator,
         output.srclocs,
         &args.filename,
-        &args.output,
         output.program,
         rue_env,
         TARGET_ADDR,

@@ -99,8 +99,7 @@ pub fn compile(
 
         let compiled_rc: Rc<sexp::SExp> =
             convert_from_clvm_rs(allocator, Srcloc::start(filename), compiled)
-                .map_err(|e| format!("error converting clvm data: {e:?}"))?
-                .into();
+                .map_err(|e| format!("error converting clvm data: {e:?}"))?;
 
         // Build a swap table for taking SExp objects we have line numbers for and
         // inserting them into the translated code, replacing the unlabeled ones.
@@ -124,8 +123,7 @@ pub fn compile(
         for (h, e) in entries_to_replace.into_iter() {
             swap_table.insert(h, e);
         }
-        let compiled_rc = Rc::new(relabel(&swap_table, &compiled_rc));
-        compiled_rc
+        Rc::new(relabel(&swap_table, &compiled_rc))
     };
 
     let symbols = Rc::new(symbol_table);
@@ -133,7 +131,6 @@ pub fn compile(
         &mut CreateChialispSExp,
         range_results,
         filename,
-        &filename,
         RcSExp(compiled),
         RcSExp(env_parsed[0].clone()),
         TARGET_ADDR,

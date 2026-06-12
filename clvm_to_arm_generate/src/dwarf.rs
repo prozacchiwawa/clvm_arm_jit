@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -255,7 +254,6 @@ impl DwarfBuilder {
         &mut self,
         addr: usize,
         loc: &C::SL,
-        source_sexp: &impl fmt::Display,
         instr: Instr,
         begin_end_block: Option<BeginEndBlock>,
     ) {

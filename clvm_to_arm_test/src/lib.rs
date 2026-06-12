@@ -1,16 +1,16 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpListener;
-use std::sync::mpsc;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::thread;
 
 use subprocess::Exec;
 use tempfile::NamedTempFile;
 
-use clvm_to_arm_generate::code::{ElfObject, TARGET_ADDR};
 use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_emulate::emu_stub::run_stub;
+use clvm_to_arm_generate::code::{ElfObject, TARGET_ADDR};
 
 pub fn run_gdb(
     object: ElfObject,
@@ -23,11 +23,7 @@ pub fn run_gdb(
     let symbols_ref: &HashMap<String, String> = &symbols;
     let symbols_copy = symbols_ref.clone();
     let _gdb_thread = thread::spawn(move || {
-        let mut emu = Emu::new(
-            &object.object_file,
-            TARGET_ADDR,
-            Rc::new(symbols_copy)
-        ).unwrap();
+        let mut emu = Emu::new(&object.object_file, TARGET_ADDR, Rc::new(symbols_copy)).unwrap();
         let sockaddr = "127.0.0.1:0";
         let sock = TcpListener::bind(sockaddr).unwrap();
         let local_addr = sock.local_addr().unwrap();
@@ -46,6 +42,10 @@ pub fn run_gdb(
         }
     }
     gdb_command_line.push(elf_out.path().display().to_string());
-    let result = Exec::cmd("gdb-multiarch").args(&gdb_command_line).capture().unwrap().stdout_str();
+    let result = Exec::cmd("gdb-multiarch")
+        .args(&gdb_command_line)
+        .capture()
+        .unwrap()
+        .stdout_str();
     Ok(result)
 }

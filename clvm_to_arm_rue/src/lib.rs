@@ -383,7 +383,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         }
         self.function_argument_trees.insert(
             symbol,
-            argument_tree_expression(&function_env, &function.parameters, symbol == self.main)
+            argument_tree_expression(&function_env, &function.parameters, symbol == self.main),
         );
 
         let mut expr = self.lower_hir(&function_env, function.body);
@@ -1245,7 +1245,11 @@ fn parameter_expression(names: &[String]) -> String {
     }
 }
 
-fn argument_tree_expression(env: &Environment, parameters: &IndexMap<String, SymbolId>, is_main: bool) -> String {
+fn argument_tree_expression(
+    env: &Environment,
+    parameters: &IndexMap<String, SymbolId>,
+    is_main: bool,
+) -> String {
     match env {
         Environment::Nil => "()".to_string(),
         Environment::Leaf(symbol) => parameters
@@ -1554,11 +1558,7 @@ fn add_function_symbol_metadata(
     let mut key = format!("{hash}_arguments");
     symbol_table.insert(key, arguments.to_string());
     key = format!("{hash}_left_env");
-    if name == "main" {
-        symbol_table.insert(key, "0".to_string());
-    } else {
-        symbol_table.insert(key, "1".to_string());
-    }
+    symbol_table.insert(key, "0".to_string());
 }
 
 struct RueCompileOutput {

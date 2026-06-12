@@ -921,7 +921,10 @@ impl DwarfBuilder {
 
         // Figure out whether the source changed.
         let source_changed = if let Some(last) = self.last_row_source.as_ref() {
-            matches!(begin_end_block, Some(BeginEndBlock::ForceLine)) || source_file != last.filename || line != last.line || col != last.col
+            matches!(begin_end_block, Some(BeginEndBlock::ForceLine))
+                || source_file != last.filename
+                || line != last.line
+                || col != last.col
         } else {
             true
         };
@@ -1028,11 +1031,13 @@ impl DwarfBuilder {
                 .symbol_table
                 .get(&String::from_utf8_lossy(&stripped).to_string())
                 .map(|s| {
-                    format!("{s}")
+                    if left_env {
+                        format!("(() . {s})")
+                    } else {
+                        s.to_string()
+                    }
                 })
-                .unwrap_or_else(|| {
-                    "ENV".to_string()
-                });
+                .unwrap_or_else(|| "ENV".to_string());
             return Some((name, args));
         }
 
@@ -2167,22 +2172,23 @@ impl<C: CreateSExp> Program<C> {
                 // XXX in this case.  Revisit this when we know how to mark up
                 // XXX the named symbol properly.
                 if let Some(funname) = self.function_symbols.get(defname) {
-                    self.defined_with_name.insert(format!("_$_{funname}"), defname.clone());
+                    self.defined_with_name
+                        .insert(format!("_$_{funname}"), defname.clone());
                 }
 
-                let start =
-                    if defname.starts_with("_$_") {
-                        Some(3)
-                    } else if defname.starts_with("_") {
-                        Some(1)
-                    } else {
-                        None
-                    };
+                let start = if defname.starts_with("_$_") {
+                    Some(3)
+                } else if defname.starts_with("_") {
+                    Some(1)
+                } else {
+                    None
+                };
                 if let Some(start) = start {
                     if defname.len() >= start + 64 {
                         let stripped_symbol = &defname[start..(start + 64)];
                         if let Some(funname) = self.symbol_table.get(stripped_symbol) {
-                            self.defined_with_name.insert(funname.clone(), funname.clone());
+                            self.defined_with_name
+                                .insert(funname.clone(), funname.clone());
                         }
                     }
                 }

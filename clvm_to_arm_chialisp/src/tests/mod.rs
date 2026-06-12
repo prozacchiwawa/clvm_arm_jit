@@ -16,7 +16,7 @@ use clvmr::Allocator;
 use tempfile::NamedTempFile;
 
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
-use clvm_to_arm_generate::code::{Program, TARGET_ADDR, ElfObject};
+use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 #[cfg(test)]
 use clvm_to_arm_test::run_gdb;
 
@@ -33,7 +33,7 @@ fn compile(
     allocator: &mut Allocator,
     filename: &str,
     program: &str,
-    env: &str
+    env: &str,
 ) -> Result<CompileResult, String> {
     let srcloc = Srcloc::start(filename);
     let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).map_err(|e| format!("{e:?}"))?;
@@ -62,7 +62,8 @@ fn compile(
         .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
         .collect();
 
-    let compiled = compile_file(allocator, runner, opts, program, &mut symbol_table).map_err(|e| format!("{e:?}"))?
+    let compiled = compile_file(allocator, runner, opts, program, &mut symbol_table)
+        .map_err(|e| format!("{e:?}"))?
         .to_sexp();
     build_symbol_table_mut(&mut symbol_table, &compiled);
     let tmpfile = NamedTempFile::new().map_err(|e| format!("{e:?}"))?;
@@ -88,8 +89,12 @@ fn compile(
 fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option<Rc<SExp>>> {
     let mut allocator = Allocator::new();
     let compiled = compile(&mut allocator, filename, program, env)?;
-    let node_result =
-        Emu::run_to_exit(&mut allocator, &compiled.object.object_file, TARGET_ADDR, compiled.symbols.clone())?;
+    let node_result = Emu::run_to_exit(
+        &mut allocator,
+        &compiled.object.object_file,
+        TARGET_ADDR,
+        compiled.symbols.clone(),
+    )?;
     Ok(node_result.map(|r| {
         convert_from_clvm_rs(&mut allocator, Srcloc::start("*emu*"), r).expect("converted")
     }))
@@ -105,11 +110,7 @@ fn compile_and_gdb(
     let mut allocator = Allocator::new();
     let compiled = compile(&mut allocator, filename, program, env)?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
-    run_gdb(
-        compiled.object,
-        compiled.symbols.clone(),
-        gdb_commands,
-    )
+    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands)
 }
 
 #[test]
@@ -325,14 +326,9 @@ fn test_gdb_breakpoint_on_function_classic() {
         "test.clsp",
         "(mod (A)\n  (defun F (X Y) (+ X Y))\n  (F A 3)\n)",
         "(17)",
-        &[
-            "set confirm off",
-            "break F",
-            "info breakpoints",
-            "quit"
-        ]
+        &["set confirm off", "break F", "info breakpoints", "quit"],
     )
-        .expect("should compile and load");
+    .expect("should compile and load");
     eprintln!("result {result}");
     assert!(!result.contains("<MULTIPLE>"));
     assert!(result.contains("clsp:2"));

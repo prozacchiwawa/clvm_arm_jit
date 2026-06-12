@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub mod tests;
+
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,18 +18,11 @@ use rue_hir::{
 use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
-#[cfg(test)]
-use clvmr::Allocator;
-
-#[cfg(test)]
-use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
 use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 
 use chialisp::classic::clvm_tools::binutils::assemble;
-#[cfg(test)]
-use chialisp::classic::clvm_tools::binutils::disassemble;
 use chialisp::classic::clvm_tools::sha256tree::sha256tree;
 use chialisp::compiler::sexp::decode_string;
 use chialisp::util::Number;
@@ -387,7 +383,7 @@ impl<'d, 'a, 'g> DebugLowerer<'d, 'a, 'g> {
         }
         self.function_argument_trees.insert(
             symbol,
-            argument_tree_expression(&function_env, &function.parameters),
+            argument_tree_expression(&function_env, &function.parameters, symbol == self.main),
         );
 
         let mut expr = self.lower_hir(&function_env, function.body);
@@ -1249,7 +1245,11 @@ fn parameter_expression(names: &[String]) -> String {
     }
 }
 
-fn argument_tree_expression(env: &Environment, parameters: &IndexMap<String, SymbolId>) -> String {
+fn argument_tree_expression(
+    env: &Environment,
+    parameters: &IndexMap<String, SymbolId>,
+    is_main: bool,
+) -> String {
     match env {
         Environment::Nil => "()".to_string(),
         Environment::Leaf(symbol) => parameters
@@ -1263,10 +1263,14 @@ fn argument_tree_expression(env: &Environment, parameters: &IndexMap<String, Sym
             })
             .unwrap_or_else(|| "()".to_string()),
         Environment::Pair(first, rest) => {
+            if is_main {
+                return argument_tree_expression(rest, parameters, false);
+            }
+
             format!(
                 "({} . {})",
-                argument_tree_expression(first, parameters),
-                argument_tree_expression(rest, parameters)
+                argument_tree_expression(first, parameters, false),
+                argument_tree_expression(rest, parameters, false)
             )
         }
     }
@@ -1816,28 +1820,4 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         .to_elf(&args.output)
         .map(|p| RueGenerateOutput { object: p, symbols })
         .map_err(|e| format!("failed to create elf output: {e:?}"))
-}
-
-#[test]
-fn test_rue_compile_and_run_as_arm() {
-    let output = "factorial.rue.elf";
-    let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(5)".to_string(),
-        filename: "../resources/tests/factorial.rue".to_string(),
-        output: output.to_string(),
-    })
-    .unwrap();
-    let mut allocator = Allocator::new();
-    // std::fs::write(output, &compiled.object.object_file).unwrap();
-    let result = Emu::run_to_exit(
-        &mut allocator,
-        &compiled.object.object_file,
-        TARGET_ADDR,
-        compiled.symbols,
-    )
-    .unwrap();
-    assert_eq!(
-        result.map(|result| disassemble(&allocator, result, None)),
-        Some("120".to_string())
-    );
 }

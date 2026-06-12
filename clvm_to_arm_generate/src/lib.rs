@@ -1,3 +1,4 @@
+pub mod arm;
 pub mod clvmr_node;
 pub mod code;
 pub mod disassemble;

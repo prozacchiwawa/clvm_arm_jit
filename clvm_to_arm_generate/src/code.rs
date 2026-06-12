@@ -1027,18 +1027,10 @@ impl DwarfBuilder {
                 .symbol_table
                 .get(&String::from_utf8_lossy(&stripped).to_string())
                 .map(|s| {
-                    if left_env {
-                        format!("(() . {s})")
-                    } else {
-                        s.to_string()
-                    }
+                    format!("{s}")
                 })
                 .unwrap_or_else(|| {
-                    if left_env {
-                        "(() . ENV)".to_string()
-                    } else {
-                        "ENV".to_string()
-                    }
+                    "ENV".to_string()
                 });
             return Some((name, args));
         }
@@ -1128,7 +1120,8 @@ impl DwarfBuilder {
         label: &str,
         addr: usize,
         size: usize,
-        preferred_name: Option<&str>,
+        sexp: C::S,
+        preferred_name: Option<&String>,
     ) -> Option<String> {
         let mut fde = FrameDescriptionEntry::new(
             Address::Constant((self.target_addr as usize + addr) as u64),
@@ -1163,9 +1156,9 @@ impl DwarfBuilder {
 
         let matched_signature = self.match_function(label);
         let name = preferred_name
-            .map(str::to_string)
-            .or_else(|| matched_signature.as_ref().map(|(name, _)| name.clone()))
-            .unwrap_or_else(|| label.to_string());
+            .cloned()
+            .or_else(|| matched_signature.clone().map(|(name, _)| name.clone()))
+            .unwrap_or_else(|| format!("{sexp}"));
         let args = matched_signature
             .as_ref()
             .map(|(_, args)| args.clone())
@@ -1261,7 +1254,7 @@ impl DwarfBuilder {
             }
         }
 
-        Some(name)
+        Some(name.clone())
     }
 
     fn write_section(
@@ -1332,7 +1325,7 @@ pub struct Program<C: CreateSExp> {
     waiting_programs: Vec<(String, C::S)>,
     constants: HashMap<Vec<u8>, Constant>,
     symbol_table: Rc<HashMap<String, String>>,
-    current_symbol: Option<String>,
+    current_symbol: String,
     current_symbol_name: Option<String>,
     function_symbols: HashMap<String, String>,
     renamed_symbols: HashMap<String, String>,
@@ -1554,7 +1547,7 @@ impl<C: CreateSExp> Program<C> {
             return self.do_throw(creator, source_sexp, loc, hash);
         }
 
-        let subexp = self.add(lst[0].clone());
+        let subexp = self.add(source_sexp.clone(), lst[0].clone());
         for i in &[
             Instr::Addi(Register::R(0), Register::R(7), 0),
             // Determine if the result is a cons.
@@ -1592,9 +1585,9 @@ impl<C: CreateSExp> Program<C> {
 
         // Quote is special.
         if a == [1] {
-            self.add(b.clone());
+            self.add(source_sexp.clone(), b.clone());
             let b_hash = b.sha256tree();
-            return self.load_sexp(creator, source_sexp, loc, &b_hash, b);
+            return self.load_sexp(creator, b.clone(), loc, &b_hash, b);
         }
 
         // Every other operator must have a proper list following it.
@@ -1610,7 +1603,7 @@ impl<C: CreateSExp> Program<C> {
                 return self.do_throw(creator, source_sexp, loc, hash);
             }
 
-            let env_comp = self.add(lst[1].clone());
+            let env_comp = self.add(source_sexp.clone(), lst[1].clone());
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
                 Instr::Bl(env_comp),
@@ -1621,7 +1614,7 @@ impl<C: CreateSExp> Program<C> {
 
             if let Some(quoted_code) = dequote(lst[0].clone()) {
                 // Short circuit by reading out the quoted code and running it.
-                self.add(quoted_code.clone());
+                self.add(lst[0].clone(), quoted_code.clone());
 
                 for i in &[
                     Instr::Addi(Register::R(7), Register::R(4), 0),
@@ -1631,7 +1624,7 @@ impl<C: CreateSExp> Program<C> {
                     self.push(creator, source_sexp.clone(), loc, i.clone());
                 }
             } else {
-                let code_comp = self.add(lst[0].clone());
+                let code_comp = self.add(source_sexp.clone(), lst[0].clone());
 
                 for i in &[
                     Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1656,9 +1649,9 @@ impl<C: CreateSExp> Program<C> {
                 return self.do_throw(creator, source_sexp, loc, hash);
             }
 
-            let else_clause = self.add(lst[2].clone());
-            let then_clause = self.add(lst[1].clone());
-            let cond_clause = self.add(lst[0].clone());
+            let else_clause = self.add(source_sexp.clone(), lst[2].clone());
+            let then_clause = self.add(source_sexp.clone(), lst[1].clone());
+            let cond_clause = self.add(source_sexp.clone(), lst[0].clone());
 
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1684,8 +1677,8 @@ impl<C: CreateSExp> Program<C> {
                 return self.do_throw(creator, source_sexp, loc, hash);
             }
 
-            let rest_label = self.add(lst[1].clone());
-            let first_label = self.add(lst[0].clone());
+            let rest_label = self.add(source_sexp.clone(), lst[1].clone());
+            let first_label = self.add(source_sexp.clone(), lst[0].clone());
 
             for i in &[
                 Instr::Addi(Register::R(0), Register::R(7), 0),
@@ -1726,7 +1719,7 @@ impl<C: CreateSExp> Program<C> {
 
             // For each subexpression, call it and replace R4 with (cons R0 R4)
             for item in lst.iter().rev() {
-                let clause_label = self.add(item.clone());
+                let clause_label = self.add(source_sexp.clone(), item.clone());
                 for i in &[
                     // Load the allocator ptr into R0.
                     Instr::Ldr(Register::R(0), Register::R(5), NEXT_ALLOC_OFFSET),
@@ -1842,7 +1835,7 @@ impl<C: CreateSExp> Program<C> {
         self.push(creator, source_sexp, loc, Instr::Lea(Register::R(0), label));
     }
 
-    fn add(&mut self, sexp: C::S) -> String {
+    fn add(&mut self, parent: C::S, sexp: C::S) -> String {
         let hash = sexp.sha256tree();
         if let Some(existing_label) = self.labels_by_hash.get(&hash) {
             return existing_label.clone();
@@ -1872,20 +1865,8 @@ impl<C: CreateSExp> Program<C> {
         begin_end_block: Option<BeginEndBlock>,
     ) {
         let size = instr.size(self.current_addr);
-        let insert_instr = if let Instr::Globl(g) = &instr {
-            // Two things: ensure we switch to real function names when we
-            // have them.
-            //
-            // Ensure we set the current symbol.
-            self.current_symbol = Some(g.clone());
-            self.current_symbol_name = self.get_renamed_name_for_label(g);
 
-            instr
-        } else {
-            instr
-        };
-
-        self.finished_insns.push(insert_instr.clone());
+        self.finished_insns.push(instr.clone());
         let start_block = matches!(begin_end_block, Some(BeginEndBlock::BeginBlock));
         let end_block = matches!(begin_end_block, Some(BeginEndBlock::EndBlock));
 
@@ -1894,34 +1875,20 @@ impl<C: CreateSExp> Program<C> {
             self.start_addr = self.current_addr;
         }
 
-        if end_block {
-            self.current_addr = (self.current_addr + 15) & !15;
-            if let Some(label) = self.current_symbol.as_ref() {
-                let preferred_name = self.current_symbol_name.clone();
-                if let Some(function_name) = self.dwarf_builder.decorate_function::<C>(
-                    creator,
-                    label,
-                    self.start_addr,
-                    self.current_addr - self.start_addr,
-                    preferred_name.as_deref(),
-                ) {
-                    self.function_symbols.insert(label.clone(), function_name);
-                }
-                self.current_symbol = None;
-                self.current_symbol_name = None;
-            }
-        }
-
         if size != 0 {
             let next_addr = self.current_addr + size;
             self.dwarf_builder.add_instr::<C>(
                 self.current_addr,
                 srcloc,
                 &source_sexp,
-                insert_instr,
+                instr.clone(),
                 begin_end_block,
             );
             self.current_addr = next_addr;
+        }
+
+        if end_block {
+            self.current_addr = (self.current_addr + 15) & !15;
         }
     }
 
@@ -1934,7 +1901,12 @@ impl<C: CreateSExp> Program<C> {
             let hash = sexp.sha256tree();
 
             self.labels_by_hash.insert(hash.clone(), label.clone());
+            self.current_symbol = label.clone();
+            self.current_symbol_name = self.get_renamed_name_for_label(&label);
+
             self.dwarf_builder.start(self.current_addr);
+
+            let pstart = self.finished_insns.len();
 
             self.push(
                 creator,
@@ -1948,6 +1920,7 @@ impl<C: CreateSExp> Program<C> {
                 &creator.loc(sexp.clone()),
                 Instr::Label(label.clone()),
             );
+
             self.push_be(
                 creator,
                 sexp.clone(),
@@ -2040,7 +2013,21 @@ impl<C: CreateSExp> Program<C> {
                 Instr::Bx(Register::LR),
                 Some(BeginEndBlock::EndBlock),
             );
+
             self.dwarf_builder.end(self.current_addr);
+
+            if let Some(function_name) = self.dwarf_builder.decorate_function(
+                creator,
+                &label,
+                self.start_addr,
+                self.current_addr - self.start_addr,
+                sexp.clone(),
+                self.current_symbol_name.as_ref(),
+            ) {
+                self.function_symbols.insert(label.clone(), function_name);
+            }
+
+            self.current_symbol_name = None;
         }
     }
 
@@ -2162,28 +2149,6 @@ impl<C: CreateSExp> Program<C> {
             }
         }
         swap(&mut constants, &mut self.constants);
-
-        // Export remapped function names by hash so the emulator can resolve
-        // a tree hash to a renamed symbol after loading the ELF.
-        let mut renamed_symbols: Vec<_> = self
-            .renamed_symbols
-            .iter()
-            .map(|(hash, target_name)| (hash.clone(), target_name.clone()))
-            .collect();
-        renamed_symbols.sort_by(|a, b| a.0.cmp(&b.0));
-        for (hash, target_name) in renamed_symbols.into_iter() {
-            let mut target_name_bytes = target_name.as_bytes().to_vec();
-            target_name_bytes.push(0);
-            let remap_label = format!("_$_{hash}");
-            for i in &[
-                Instr::Align4,
-                Instr::Globl(remap_label.clone()),
-                Instr::Label(remap_label),
-                Instr::Bytes(target_name_bytes.clone()),
-            ] {
-                self.push(creator, source_sexp.clone(), &srcloc, i.clone());
-            }
-        }
 
         // Capture mappings from function symbols to names (one per target).
         for i in self.finished_insns.iter() {
@@ -2460,7 +2425,7 @@ impl<C: CreateSExp> Program<C> {
             current_addr: 0,
             start_addr: 0,
             target_addr,
-            current_symbol: None,
+            current_symbol: "_start".to_string(),
             current_symbol_name: None,
             dwarf_builder,
         };
@@ -2473,7 +2438,7 @@ impl<C: CreateSExp> Program<C> {
                 .insert(remap_hash_hex.clone(), name.clone());
             p.add_sexp(&remap_hash, remap_sexp.clone());
         }
-        p.first_label = p.add(sexp.clone());
+        p.first_label = p.add(sexp.clone(), sexp.clone());
         p.start_insns(creator);
         p.env_label = p.add_sexp(&envhash, env);
         p.emit_waiting(creator);

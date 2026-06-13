@@ -1,0 +1,13 @@
+fn check_div_by(num: Int, div: Int) -> Int {
+  debug ["check_div_by(", num, div, ")"];
+  if div > 1 {
+    assert (num % div) != 0;
+    check_div_by(num, div - 1)
+  } else {
+    0
+  }
+}
+
+fn main(num: Int, div: Int) -> Int {
+  check_div_by(num, div)
+}

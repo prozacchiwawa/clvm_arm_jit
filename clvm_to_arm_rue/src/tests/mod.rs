@@ -66,7 +66,7 @@ fn test_rue_assert_fail() {
     .unwrap();
 
     std::fs::write(output, &compiled.object.object_file).unwrap();
-    let result = run_gdb(
+    let (result, _) = run_gdb(
         compiled.object,
         compiled.symbols,
         &[
@@ -90,4 +90,40 @@ fn test_rue_assert_fail() {
         .to_string();
     let use_result = result[found_idx..end_idx].trim().to_string();
     assert_eq!(must_have_result, use_result);
+}
+
+#[test]
+fn test_rue_debug() {
+    let output = "test_debug.rue.elf";
+    let compiled = compile_rue_to_arm_elf(&Args {
+        env: "(16384 19)".to_string(),
+        filename: "../resources/tests/test_debug.rue".to_string(),
+        output: output.to_string(),
+    })
+    .unwrap();
+
+    std::fs::write(output, &compiled.object.object_file).unwrap();
+    let (_, stderr) = run_gdb(
+        compiled.object,
+        compiled.symbols,
+        &[
+            "set confirm off",
+            "handle SIGUSR1 nostop",
+            "set width 1000000",
+            "dir ../resources/tests",
+            "$REMOTE",
+            "source ../support/gdb_print_sexp.py",
+            "cont",
+            "bt",
+            "quit",
+        ],
+    )
+    .unwrap();
+    for num in 0..4 {
+        let want = format!(
+            "DEBUG: (b'test_debug.rue:2:3' (b'check_div_by(' 16384 {} 41))",
+            19 - num
+        );
+        assert!(stderr.contains(&want));
+    }
 }

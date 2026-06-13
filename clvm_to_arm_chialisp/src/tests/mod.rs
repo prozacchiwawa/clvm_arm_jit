@@ -57,7 +57,7 @@ fn compile_and_gdb(
         env,
     )?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
-    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands)
+    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands).map(|(out, err)| out)
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn test_gdb_breakpoint_on_function_classic() {
         "(17)",
         &["set confirm off", "break F", "info breakpoints", "quit"],
     )
-        .expect("should compile and load");
+    .expect("should compile and load");
     eprintln!("result {result}");
     assert!(!result.contains("<MULTIPLE>"));
     assert!(result.contains("clsp:2"));
@@ -295,9 +295,10 @@ fn test_gdb_exception_classic() {
             "source ../support/gdb_print_sexp.py",
             "$REMOTE",
             "cont",
-            "quit"
-        ]
-    ).unwrap();
+            "quit",
+        ],
+    )
+    .unwrap();
     eprintln!("result {result}");
     assert!(result.contains("Program received signal SIGABRT, Aborted.\n(8 (1 . no))"));
 }
@@ -311,7 +312,7 @@ fn test_gdb_breakpoint_on_function_modern() {
         "(17)",
         &["set confirm off", "break F", "info breakpoints", "quit"],
     )
-        .expect("should compile and load");
+    .expect("should compile and load");
     eprintln!("result {result}");
     assert!(!result.contains("<MULTIPLE>"));
     assert!(result.contains("clsp:3"));

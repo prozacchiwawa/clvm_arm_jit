@@ -329,14 +329,20 @@ fn is_quote_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
     false
 }
 
-fn match_printing(allocator: &Allocator, operator: NodePtr, sexp: NodePtr) -> Option<(bool, NodePtr)> {
+fn match_printing(
+    allocator: &Allocator,
+    operator: NodePtr,
+    sexp: NodePtr,
+) -> Option<(bool, NodePtr)> {
     if let Some(v) = get_number(allocator, operator)
         && v == 34_u32.to_bigint().unwrap()
     {
         return is_print_request(allocator, sexp).map(|p| (false, p));
     }
 
-    if let SExp::Atom = allocator.sexp(operator) && allocator.atom(operator) == clvmr::Atom::Borrowed(b"debug_print") {
+    if let SExp::Atom = allocator.sexp(operator)
+        && allocator.atom(operator) == clvmr::Atom::Borrowed(b"debug_print")
+    {
         return Some((true, sexp));
     }
 
@@ -475,12 +481,11 @@ impl Emu {
             assume_nil = nil;
         }
 
-        let result =
-            if assume_nil {
-                Ok(allocator.nil())
-            } else {
-                apply_op(allocator, operator, args)
-            };
+        let result = if assume_nil {
+            Ok(allocator.nil())
+        } else {
+            apply_op(allocator, operator, args)
+        };
 
         match result {
             Ok(res) => {

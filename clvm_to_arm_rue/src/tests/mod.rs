@@ -120,7 +120,10 @@ fn test_rue_debug() {
     )
     .unwrap();
     for num in 0..4 {
-        let want = format!("DEBUG: (b'test_debug.rue:2:3' (b'check_div_by(' 16384 {} 41))", 19 - num);
+        let want = format!(
+            "DEBUG: (b'test_debug.rue:2:3' (b'check_div_by(' 16384 {} 41))",
+            19 - num
+        );
         assert!(stderr.contains(&want));
     }
 }

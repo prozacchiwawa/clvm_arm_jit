@@ -54,6 +54,13 @@ pub fn match_defun(clvm: &sexp::SExp) -> Option<(Vec<u8>, SrclocWrap)> {
     None
 }
 
+/// Given a clvm allocator, filename of the main source file, program text, output file
+/// and search paths for clvm includes, run the clvm compiler and the program generator
+/// and yield an executable suitable for running in the emulator stub.
+///
+/// This is meant as a high level entry point that performs all needed work, such as
+/// collecting as much line number information as possible and dealing with different forms
+/// of chialisp.
 pub fn compile(
     allocator: &mut Allocator,
     filename: &str,

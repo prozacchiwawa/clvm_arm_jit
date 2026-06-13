@@ -25,6 +25,8 @@ pub const SWI_PRINT_EXPR: usize = 4;
 
 pub const TARGET_ADDR: u32 = 0x1000;
 
+/// Object representing the output of the code generation process.
+/// - object_file contains the elf executable.
 pub struct ElfObject {
     pub object_file: Vec<u8>,
 }
@@ -125,6 +127,25 @@ pub struct WaitingProgram<C: CreateSExp> {
     parent: Option<Rc<WaitingProgram<C>>>,
 }
 
+/// An object which accumulates information from clvm code with the goal of generating an
+/// elf executable with 32-bit arm code that represents the same program.  Detail is provided
+/// which carries out structural changes to clvm values or acts simply on clvm values for
+/// control flow and data retrieval.  The set of operators chosen to be inlined is meant to
+/// give the user the best chance of being able to solve problems in clvm code by examining
+/// how the code executes and how values evolve.
+///
+/// Complex operators are run using an svc 2 (dispatch instruction) trap, which the emulator
+/// performs.  This keeps code compact and keeps the complexities if clvm itself outside the
+/// generated code at the cost of making complex operations operate invisibly and atomically.
+/// If uses are desired, it's possible later to add more introspection of this process to
+/// the connection with gdb.
+///
+/// Multiple iterations of repeated code may be emitted.  Each instance in the clvm tree of
+/// each operator is emitted separately so that it can be distinguished in stack traces and
+/// in case it has different line number information.
+///
+/// The resulting program has an entry point at 0x1000 and expects a pointer to the
+/// environment in r1.
 pub struct Program<C: CreateSExp> {
     target_addr: u32,
     finished_insns: Vec<Instr>,
@@ -922,6 +943,7 @@ impl<C: CreateSExp> Program<C> {
         Ok(())
     }
 
+    /// Produce the executable.
     pub fn to_elf(&self, output: &str) -> Result<ElfObject, String> {
         let mut sections = Vec::new();
         let mut obj = ArtifactBuilder::new(triple!("arm-unknown-unknown-unknown-elf"))
@@ -1062,13 +1084,26 @@ impl<C: CreateSExp> Program<C> {
         })
     }
 
+    /// Given -
+    /// - a clvm value creator (which mediates access to clvm values implemented in
+    /// different ways)
+    ///
+    /// - a collection of line number data indexed by treehash.
+    ///
+    /// - the filename of the main source file.
+    ///
+    /// - the s-expression containing the clvm program to convert.
+    ///
+    /// - the symbol table in chialisp style.
+    ///
+    /// Set up this object to produce the given program as an elf executable containing
+    /// 32-bit arm code.  This must run in the provided emulator.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         creator: &mut C,
-        program: HashMap<String, C::SL>,
+        program_lines: HashMap<String, C::SL>,
         filename: &str,
         sexp: C::S,
-        target_addr: u32,
         symbol_table: Rc<HashMap<String, String>>,
     ) -> Result<Self, String> {
         let remap_hashes: Vec<_> = symbol_table
@@ -1077,13 +1112,13 @@ impl<C: CreateSExp> Program<C> {
                 if name.contains(':') || name.contains('_') || name == "source_file" {
                     return None;
                 }
-                if !program.contains_key(name) {
+                if !program_lines.contains_key(name) {
                     return None;
                 }
 
                 if let Ok(byte_hash) = hex::decode(hash) {
                     let all_matches = find_all_by_hash(&byte_hash, sexp.clone());
-                    let selected = if let Some(target_loc) = program.get(name) {
+                    let selected = if let Some(target_loc) = program_lines.get(name) {
                         all_matches
                             .iter()
                             .find(|matched| {
@@ -1104,7 +1139,7 @@ impl<C: CreateSExp> Program<C> {
             })
             .collect();
 
-        let dwarf_builder = DwarfBuilder::new(filename, target_addr, symbol_table.clone());
+        let dwarf_builder = DwarfBuilder::new(filename, TARGET_ADDR, symbol_table.clone());
         let mut p: Program<C> = Program {
             finished_insns: Vec::new(),
             first_label: Default::default(),
@@ -1119,7 +1154,7 @@ impl<C: CreateSExp> Program<C> {
             defined_with_name: Default::default(),
             current_addr: 0,
             start_addr: 0,
-            target_addr,
+            target_addr: TARGET_ADDR,
             current_symbol: "_start".to_string(),
             current_symbol_name: None,
             dwarf_builder,

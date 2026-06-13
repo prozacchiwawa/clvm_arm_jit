@@ -19,7 +19,7 @@ use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
-use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::{ElfObject, Program};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 
 use chialisp::classic::clvm_tools::binutils::assemble;
@@ -1727,6 +1727,9 @@ pub struct RueGenerateOutput {
     pub symbols: Rc<HashMap<String, String>>,
 }
 
+/// Generate an elf executable suitable for running in the gdb stub, based on the given
+/// arguments.  This is a high level entrypoint for compiling rue code to execute in
+/// gdb using the provided emulator and gdb stub.
 pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> {
     let mut creator = CreateRueSExp::new();
     let search_path = Path::new(&args.filename)
@@ -1799,7 +1802,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         output.srclocs,
         &args.filename,
         output.program,
-        TARGET_ADDR,
         symbols.clone(),
     )?;
 

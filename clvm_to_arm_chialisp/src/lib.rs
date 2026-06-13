@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::{ElfObject, Program};
 use clvmr::Allocator;
 
 use chialisp::classic::clvm_tools::comp_input::RunAndCompileInputData;
@@ -54,6 +54,13 @@ pub fn match_defun(clvm: &sexp::SExp) -> Option<(Vec<u8>, SrclocWrap)> {
     None
 }
 
+/// Given a clvm allocator, filename of the main source file, program text, output file
+/// and search paths for clvm includes, run the clvm compiler and the program generator
+/// and yield an executable suitable for running in the emulator stub.
+///
+/// This is meant as a high level entry point that performs all needed work, such as
+/// collecting as much line number information as possible and dealing with different forms
+/// of chialisp.
 pub fn compile(
     allocator: &mut Allocator,
     filename: &str,
@@ -157,7 +164,6 @@ pub fn compile(
         range_results,
         filename,
         RcSExp(compiled),
-        TARGET_ADDR,
         symbols.clone(),
     )?;
     Ok(CompileResult {

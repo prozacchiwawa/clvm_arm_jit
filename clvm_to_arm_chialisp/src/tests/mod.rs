@@ -9,7 +9,6 @@ use chialisp::compiler::srcloc::Srcloc;
 use clvmr::Allocator;
 
 use clvm_to_arm_emulate::emu::{DynResult, Emu};
-use clvm_to_arm_generate::code::TARGET_ADDR;
 #[cfg(test)]
 use clvm_to_arm_test::run_gdb;
 
@@ -33,7 +32,6 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         &mut allocator,
         &compiled.object.object_file,
         env_node,
-        TARGET_ADDR,
         compiled.symbols.clone(),
     )?;
     Ok(node_result.map(|r| {
@@ -76,7 +74,6 @@ fn test_run_to_exit_and_return_nil() {
         &mut allocator,
         &elf,
         nil,
-        TARGET_ADDR,
         Rc::new(HashMap::default()),
     )
     .expect("should load")
@@ -93,7 +90,6 @@ fn test_run_to_exit_and_return_pair() {
         &mut allocator,
         &elf,
         nil,
-        TARGET_ADDR,
         Rc::new(HashMap::default()),
     )
     .expect("should load")

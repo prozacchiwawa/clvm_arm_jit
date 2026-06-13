@@ -185,6 +185,8 @@ impl run_blocking::BlockingEventLoop for EmuGdbEventLoop {
     }
 }
 
+/// Simple use method for starting the gdb stub.  Opens a listening port and returns when
+/// a live connection has come in from gdb.
 pub fn start_stub(
     port: Option<u16>,
 ) -> Result<(SocketAddr, Box<dyn ConnectionExt<Error = std::io::Error>>), String> {
@@ -195,6 +197,8 @@ pub fn start_stub(
     ))
 }
 
+/// Simple use method for running the gdb stub.  When a connection is received from gdb,
+/// Give it and an Emu object here to run until completion.
 pub fn run_stub(
     connection: Box<dyn ConnectionExt<Error = std::io::Error>>,
     emu: &mut Emu,
@@ -239,6 +243,8 @@ impl Connection for CallbackConnection {
 
 type CallbackGdbState = GdbStubStateMachine<'static, Emu, CallbackConnection>;
 
+/// Gives full control over the gdb stub, including the ability to use any desired
+/// form of communication.  This can be used to host the emu stub in wasm code if desired.
 pub struct CallbackGdbStub {
     emu: Emu,
     input: VecDeque<u8>,
@@ -247,6 +253,7 @@ pub struct CallbackGdbStub {
 }
 
 impl CallbackGdbStub {
+    /// Create a new gdb stub object which operates on a simple event model
     pub fn new(
         allocator: &mut Allocator,
         elf_bin: &[u8],
@@ -258,7 +265,6 @@ impl CallbackGdbStub {
             allocator,
             elf_bin,
             env,
-            clvm_to_arm_generate::code::TARGET_ADDR,
             symbols
         )
             .map_err(|e| format!("could not create emulator: {e:?}"))?;
@@ -276,6 +282,8 @@ impl CallbackGdbStub {
         })
     }
 
+    /// Provide incoming data from gdb as with a gdbserver to the emulator stub.
+    /// This will cause the emulator to run code and the stub to process events.
     pub fn incoming_data(&mut self, data: &[u8]) -> Result<(), String> {
         if let Some(reason) = self.disconnected {
             return Err(format!("gdb stub is disconnected: {reason:?}"));
@@ -285,10 +293,13 @@ impl CallbackGdbStub {
         self.pump()
     }
 
+    /// Notify the system that an interrupt happened.  This can cause the emulation
+    /// to break out at points where the emulator relinquishes control.
     pub fn interrupt(&mut self) -> Result<(), String> {
         self.incoming_data(&[0x03])
     }
 
+    /// Signal that gdb disconnected.
     pub fn disconnected(&self) -> Option<DisconnectReason> {
         self.disconnected
     }

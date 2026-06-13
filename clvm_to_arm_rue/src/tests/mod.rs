@@ -2,7 +2,6 @@ use clvmr::Allocator;
 
 use chialisp::classic::clvm_tools::binutils::disassemble;
 use clvm_to_arm_emulate::emu::Emu;
-use clvm_to_arm_generate::code::TARGET_ADDR;
 use clvm_to_arm_test::run_gdb;
 
 use crate::{Args, compile_rue_to_arm_elf};
@@ -24,7 +23,6 @@ fn test_rue_compile_and_run_as_arm() {
         &mut allocator,
         &compiled.object.object_file,
         env_node,
-        TARGET_ADDR,
         compiled.symbols,
     )
     .unwrap();
@@ -49,7 +47,6 @@ fn test_rue_assert_succeed() {
         &mut allocator,
         &compiled.object.object_file,
         env_node,
-        TARGET_ADDR,
         compiled.symbols,
     )
     .unwrap();

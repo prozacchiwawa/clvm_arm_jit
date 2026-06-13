@@ -15,8 +15,8 @@ categories = { workspace = true }
 hex = "0.4.3"
 num-bigint = { version = "0.4.4", features = ["serde"] }
 target-lexicon = "0.11.1"
-clvm_to_arm_generate = { path = "../clvm_to_arm_generate" }
-clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate" }
+clvm_to_arm_generate = { path = "../clvm_to_arm_generate", version = "0.1.0" }
+clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate", version = "0.1.0" }
 clap = { version = "4.6.1", features = [ "derive" ] }
 serde = "1.0.228"
 serde_json = "1.0.150"

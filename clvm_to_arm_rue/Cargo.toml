@@ -13,8 +13,8 @@ categories = { workspace = true }
 
 [dependencies]
 chialisp = "0.4.5"
-clvm_to_arm_generate = { path = "../clvm_to_arm_generate" }
-clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate" }
+clvm_to_arm_generate = { path = "../clvm_to_arm_generate", version = "0.1.0" }
+clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate", version = "0.1.0" }
 clvmr = "0.16.4"
 id-arena = "2.3.0"
 indexmap = "2.14.0"

@@ -12,7 +12,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-clvm_to_arm_rue = { path = "../clvm_to_arm_rue" }
+clvm_to_arm_rue = { path = "../clvm_to_arm_rue", version = "0.1.0" }
 clap = { version = "4.6.1", features = [ "derive" ] }
 
 [[bin]]

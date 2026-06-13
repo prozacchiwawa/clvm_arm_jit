@@ -13,6 +13,8 @@ use clvm_to_arm_generate::code::TARGET_ADDR;
 #[cfg(test)]
 use clvm_to_arm_test::run_gdb;
 
+use chialisp::classic::clvm_tools::binutils::assemble;
+
 use crate::compile;
 
 #[cfg(test)]
@@ -25,11 +27,12 @@ fn compile_and_run(filename: &str, program: &str, env: &str) -> DynResult<Option
         program,
         "test.elf",
         &search_paths,
-        env,
     )?;
+    let env_node = assemble(&mut allocator, env).unwrap();
     let node_result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,
+        env_node,
         TARGET_ADDR,
         compiled.symbols.clone(),
     )?;
@@ -54,19 +57,25 @@ fn compile_and_gdb(
         program,
         output,
         &search_paths,
-        env,
     )?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
-    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands).map(|(out, err)| out)
+    run_gdb(
+        compiled.object,
+        env,
+        compiled.symbols.clone(),
+        gdb_commands
+    ).map(|(out, _err)| out)
 }
 
 #[test]
 fn test_run_to_exit_and_return_nil() {
     let mut allocator = Allocator::new();
     let elf = fs::read("../resources/tests/return_nil.elf").expect("should exist");
+    let nil = allocator.nil();
     let result = Emu::run_to_exit(
         &mut allocator,
         &elf,
+        nil,
         TARGET_ADDR,
         Rc::new(HashMap::default()),
     )
@@ -79,9 +88,11 @@ fn test_run_to_exit_and_return_nil() {
 fn test_run_to_exit_and_return_pair() {
     let mut allocator = Allocator::new();
     let elf = fs::read("../resources/tests/return_cons.elf").expect("should exist");
+    let nil = allocator.nil();
     let result = Emu::run_to_exit(
         &mut allocator,
         &elf,
+        nil,
         TARGET_ADDR,
         Rc::new(HashMap::default()),
     )

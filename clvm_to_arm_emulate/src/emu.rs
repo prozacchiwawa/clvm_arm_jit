@@ -71,6 +71,7 @@ pub struct Emu {
     pub watchpoints: Vec<u32>,
     pub breakpoints: Vec<u32>,
 
+    pub env_addr: u32,
     pub reported_pid: Pid,
 
     pub clvm_symbols: Rc<HashMap<String, String>>,
@@ -384,7 +385,9 @@ impl Emu {
     }
 
     pub fn new(
+        allocator: &mut Allocator,
         program_elf: &[u8],
+        env_node: NodePtr,
         start_addr: u32,
         clvm_symbols: Rc<HashMap<String, String>>,
     ) -> DynResult<Emu> {
@@ -398,14 +401,14 @@ impl Emu {
 
         let jit_symbols = Rc::new(elf_loader.get_symbols());
 
-        // setup execution state
         cpu.reg_set(Mode::User, reg::SP, 0xffffff00);
         cpu.reg_set(Mode::User, reg::LR, HLE_RETURN_ADDR);
         cpu.reg_set(Mode::User, reg::PC, start_addr);
         cpu.reg_set(Mode::User, reg::CPSR, 0x10); // user mode
 
-        Ok(Emu {
+        let mut emu = Emu {
             start_addr,
+            env_addr: 0,
 
             custom_reg: 0x12345678,
 
@@ -423,11 +426,31 @@ impl Emu {
             clvm_symbols,
 
             pending_gdb_console_output: Vec::new(),
-        })
+        };
+
+        // Allocate the environment on the stack.
+        let alloc_ptr = emu.cpu.reg_get(Mode::User, reg::SP);
+        emu.mem.write_u32(alloc_ptr, alloc_ptr);
+        emu.env_addr = emu.allocate_and_write(
+            allocator,
+            alloc_ptr,
+            env_node,
+            false
+        );
+
+        // Env in r1.
+        emu.cpu.reg_set(Mode::User, 1, emu.env_addr);
+        // Put the stack below the environment.
+        let new_stack = emu.mem.read_u32(alloc_ptr);
+        emu.cpu.reg_set(Mode::User, reg::SP, new_stack & !15);
+
+        Ok(emu)
     }
 
     pub fn reset(&mut self) {
-        self.cpu.reg_set(Mode::User, reg::SP, 0xffffff00);
+        self.cpu.reg_set(Mode::User, 1, self.env_addr);
+        let new_stack = self.mem.read_u32(0xffffff00);
+        self.cpu.reg_set(Mode::User, reg::SP, new_stack & !15);
         self.cpu.reg_set(Mode::User, reg::LR, HLE_RETURN_ADDR);
         self.cpu.reg_set(Mode::User, reg::PC, self.start_addr);
         self.cpu.reg_set(Mode::User, reg::CPSR, 0x10);
@@ -442,33 +465,43 @@ impl Emu {
         allocator: &mut Allocator,
         alloc_ptr: u32,
         sexp: NodePtr,
+        grow_up: bool
     ) -> u32 {
         let current_addr = self.mem.read_u32(alloc_ptr);
+        let grow =
+            if grow_up {
+                |x: u32, n: u32| { (x, x + n) }
+            } else {
+                |x: u32, n: u32| { (x - n, x - n) }
+            };
         match allocator.sexp(sexp) {
             SExp::Pair(a, b) => {
-                self.mem.write_u32(alloc_ptr, current_addr + 8);
-                let a_res = self.allocate_and_write(allocator, alloc_ptr, a);
-                let b_res = self.allocate_and_write(allocator, alloc_ptr, b);
-                self.mem.write_u32(current_addr, a_res);
-                self.mem.write_u32(current_addr + 4, b_res);
+                let (target_addr, new_addr) = grow(current_addr, 8);
+                self.mem.write_u32(alloc_ptr, new_addr);
+                let a_res = self.allocate_and_write(allocator, alloc_ptr, a, grow_up);
+                let b_res = self.allocate_and_write(allocator, alloc_ptr, b, grow_up);
+                self.mem.write_u32(target_addr, a_res);
+                self.mem.write_u32(target_addr + 4, b_res);
+                target_addr
             }
             SExp::Atom => {
                 let v = allocator.atom(sexp);
                 let length_to_write = ((v.len() + 3) & !3) as u32;
+                let (target_addr, new_addr) = grow(current_addr, length_to_write + 4);
                 self.mem
-                    .write_u32(alloc_ptr, current_addr + length_to_write + 4);
-                self.mem.write_u32(current_addr, v.len() as u32 * 2 + 1);
-                self.mem.write_data(&v, current_addr + 4);
+                    .write_u32(alloc_ptr, new_addr);
+                self.mem.write_u32(target_addr, v.len() as u32 * 2 + 1);
+                self.mem.write_data(&v, target_addr + 4);
+                target_addr
             }
         }
-        current_addr
     }
 
     fn do_apply_op(
         &mut self,
         allocator: &mut Allocator,
-        mut operator: NodePtr,
-        mut args: NodePtr,
+        operator: NodePtr,
+        args: NodePtr,
     ) -> Option<Event> {
         let alloc_ptr = self.cpu.reg_get(Mode::User, 5);
         let mut debug = false;
@@ -490,7 +523,7 @@ impl Emu {
         match result {
             Ok(res) => {
                 // Allocate and write back result.
-                let write_result = self.allocate_and_write(allocator, alloc_ptr, res);
+                let write_result = self.allocate_and_write(allocator, alloc_ptr, res, true);
                 self.cpu.reg_set(Mode::User, 0, write_result);
                 // Increment pc, we handled the operation.
                 let pc = self.cpu.reg_get(Mode::User, reg::PC);
@@ -897,10 +930,11 @@ impl Emu {
     pub fn run_to_exit(
         allocator: &mut Allocator,
         program: &[u8],
+        env: NodePtr,
         start_addr: u32,
         clvm_symbols: Rc<HashMap<String, String>>,
     ) -> DynResult<Option<NodePtr>> {
-        let mut emu = Emu::new(program, start_addr, clvm_symbols)?;
+        let mut emu = Emu::new(allocator, program, env, start_addr, clvm_symbols)?;
         let elf_loader = ElfLoader::new(program, start_addr).expect("should load");
         elf_loader.load(&mut emu.mem);
 

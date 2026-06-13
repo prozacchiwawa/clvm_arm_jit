@@ -14,9 +14,6 @@ struct CmdArgs {
 
     #[arg(short, long)]
     include: Vec<String>,
-
-    #[arg(short, long)]
-    env: String,
 }
 
 fn do_compile(args: &CmdArgs) -> Result<(), String> {
@@ -28,7 +25,6 @@ fn do_compile(args: &CmdArgs) -> Result<(), String> {
         &program,
         &args.output,
         &args.include,
-        &args.env,
     )?;
     std::fs::write(&args.output, &compiled.object.object_file).map_err(|e| format!("{e:?}"))?;
     Ok(())

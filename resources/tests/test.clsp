@@ -1,0 +1,14 @@
+(mod (A B)
+
+  (defun F (A B)
+     (if (> 2 A)
+         ()
+         (if (r (divmod B A))
+             (F (- A 1) B)
+             (x "no")
+           )
+       )
+    )
+
+  (F A B)
+  )

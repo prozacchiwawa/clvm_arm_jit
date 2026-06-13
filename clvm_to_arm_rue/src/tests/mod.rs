@@ -7,20 +7,23 @@ use clvm_to_arm_test::run_gdb;
 
 use crate::{Args, compile_rue_to_arm_elf};
 
+use chialisp::classic::clvm_tools::binutils::assemble;
+
 #[test]
 fn test_rue_compile_and_run_as_arm() {
     let output = "factorial.rue.elf";
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(5)".to_string(),
         filename: "../resources/tests/factorial.rue".to_string(),
         output: output.to_string(),
     })
     .unwrap();
     let mut allocator = Allocator::new();
+    let env_node = assemble(&mut allocator, "(5)").unwrap();
     // std::fs::write(output, &compiled.object.object_file).unwrap();
     let result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,
+        env_node,
         TARGET_ADDR,
         compiled.symbols,
     )
@@ -35,16 +38,17 @@ fn test_rue_compile_and_run_as_arm() {
 fn test_rue_assert_succeed() {
     let output = "test_assert.rue.elf";
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(5 3)".to_string(),
         filename: "../resources/tests/test_assert.rue".to_string(),
         output: output.to_string(),
     })
     .unwrap();
     let mut allocator = Allocator::new();
+    let env_node = assemble(&mut allocator, "(5 3)").unwrap();
     // std::fs::write(output, &compiled.object.object_file).unwrap();
     let result = Emu::run_to_exit(
         &mut allocator,
         &compiled.object.object_file,
+        env_node,
         TARGET_ADDR,
         compiled.symbols,
     )
@@ -59,7 +63,6 @@ fn test_rue_assert_succeed() {
 fn test_rue_assert_fail() {
     let output = "test_assert.rue.elf";
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(16384 19)".to_string(),
         filename: "../resources/tests/test_assert.rue".to_string(),
         output: output.to_string(),
     })
@@ -68,6 +71,7 @@ fn test_rue_assert_fail() {
     std::fs::write(output, &compiled.object.object_file).unwrap();
     let (result, _) = run_gdb(
         compiled.object,
+        "(16384 19)",
         compiled.symbols,
         &[
             "set confirm off",
@@ -96,7 +100,6 @@ fn test_rue_assert_fail() {
 fn test_rue_debug() {
     let output = "test_debug.rue.elf";
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: "(16384 19)".to_string(),
         filename: "../resources/tests/test_debug.rue".to_string(),
         output: output.to_string(),
     })
@@ -105,6 +108,7 @@ fn test_rue_debug() {
     std::fs::write(output, &compiled.object.object_file).unwrap();
     let (_, stderr) = run_gdb(
         compiled.object,
+        "(16384 19)",
         compiled.symbols,
         &[
             "set confirm off",

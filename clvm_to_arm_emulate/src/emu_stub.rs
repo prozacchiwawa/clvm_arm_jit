@@ -14,6 +14,8 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::rc::Rc;
 
+use clvmr::{Allocator, NodePtr};
+
 use crate::emu::{DynResult, Emu, Event, RunEvent};
 
 fn wait_for_tcp(port: Option<u16>) -> DynResult<TcpStream> {
@@ -246,11 +248,19 @@ pub struct CallbackGdbStub {
 
 impl CallbackGdbStub {
     pub fn new(
+        allocator: &mut Allocator,
         elf_bin: &[u8],
+        env: NodePtr,
         symbols: Rc<std::collections::HashMap<String, String>>,
         output: Box<CallbackConnectionFun>,
     ) -> Result<Self, String> {
-        let mut emu = Emu::new(elf_bin, clvm_to_arm_generate::code::TARGET_ADDR, symbols)
+        let mut emu = Emu::new(
+            allocator,
+            elf_bin,
+            env,
+            clvm_to_arm_generate::code::TARGET_ADDR,
+            symbols
+        )
             .map_err(|e| format!("could not create emulator: {e:?}"))?;
         let connection = CallbackConnection::new(output);
         let gdb = GdbStub::new(connection);

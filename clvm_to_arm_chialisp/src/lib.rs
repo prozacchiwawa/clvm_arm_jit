@@ -14,7 +14,6 @@ use chialisp::compiler::clvm::convert_from_clvm_rs;
 use chialisp::compiler::compiler::{DefaultCompilerOpts, compile_file};
 use chialisp::compiler::comptypes::CompilerOpts;
 use chialisp::compiler::debug::{build_swap_table_mut, build_symbol_table_mut};
-use chialisp::compiler::frontend::frontend;
 use chialisp::compiler::sexp;
 use chialisp::compiler::sexp::{decode_string, parse_sexp};
 use chialisp::compiler::srcloc::Srcloc;
@@ -33,16 +32,36 @@ pub struct CompileResult {
     pub symbols: Rc<HashMap<String, String>>,
 }
 
+pub fn match_defun(clvm: &sexp::SExp) -> Option<(Vec<u8>, SrclocWrap)> {
+    if let Some(pl) = clvm.proper_list() {
+        if pl.len() < 4 {
+            return None;
+        }
+
+        if let sexp::SExp::Atom(_, defun) = &pl[0].atomize() {
+            if defun != b"defun" {
+                return None;
+            }
+        } else {
+            return None;
+        }
+
+        if let sexp::SExp::Atom(_, name) = &pl[1].atomize() {
+            return Some((name.clone(), SrclocWrap(clvm.loc())));
+        }
+    }
+
+    None
+}
+
 pub fn compile(
     allocator: &mut Allocator,
     filename: &str,
     program: &str,
     output: &str,
     search_paths: &[String],
-    env: &str,
 ) -> Result<CompileResult, String> {
     let srcloc = Srcloc::start(filename);
-    let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).map_err(|e| format!("{e:?}"))?;
     let mut symbol_table = HashMap::new();
     let runner: Rc<dyn TRunProgram> = Rc::new(DefaultProgramRunner::new());
     let mut parse_input = HashMap::new();
@@ -60,14 +79,20 @@ pub fn compile(
     let parsed_program = parse_sexp(srcloc.clone(), program.bytes())
         .map_err(|e| format!("failed to parse chialisp program {filename}: {e:?}"))?;
 
-    let fe = frontend(opts.clone(), &parsed_program)
-        .map_err(|e| format!("failed to compose frontend program: {e:?}"))?;
-    let range_results: HashMap<String, SrclocWrap> = fe
-        .compileform()
-        .helpers
-        .iter()
-        .map(|h| (decode_string(h.name()), SrclocWrap(h.loc())))
-        .collect();
+    let mut range_results: HashMap<String, SrclocWrap> = HashMap::new();
+
+    for element in parsed_program.iter() {
+        if let Some((name, loc)) = match_defun(&element) {
+            range_results.insert(decode_string(&name), loc);
+        }
+        if let Some(lst) = element.proper_list() {
+            for lv2 in lst.iter() {
+                if let Some((name, loc)) = match_defun(&lv2) {
+                    range_results.insert(decode_string(&name), loc);
+                }
+            }
+        }
+    }
 
     let compiled = if compile_input.dialect.stepping.is_some() {
         let compiled = compile_file(allocator, runner, opts.clone(), program, &mut symbol_table)
@@ -132,7 +157,6 @@ pub fn compile(
         range_results,
         filename,
         RcSExp(compiled),
-        RcSExp(env_parsed[0].clone()),
         TARGET_ADDR,
         symbols.clone(),
     )?;

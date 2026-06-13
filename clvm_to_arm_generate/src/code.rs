@@ -129,7 +129,6 @@ pub struct Program<C: CreateSExp> {
     target_addr: u32,
     finished_insns: Vec<Instr>,
     first_label: String,
-    env_label: String,
     encounters_of_code: HashMap<Vec<u8>, usize>,
     labels_by_hash: HashMap<Vec<u8>, String>,
     code_to_hash: HashMap<String, String>,
@@ -806,7 +805,7 @@ impl<C: CreateSExp> Program<C> {
             Instr::Str(Register::R(7), Register::SP, 12),
             // Load the env into r0 and the global data addr into r5.
             Instr::Lea(Register::R(5), "_run".to_string()),
-            Instr::Ldr(Register::R(7), Register::R(5), 4),
+            Instr::Addi(Register::R(7), Register::R(1), 0),
             Instr::Addi(Register::R(0), Register::R(7), 0),
             // Call the program.
             Instr::Bl(self.first_label.clone()),
@@ -847,7 +846,6 @@ impl<C: CreateSExp> Program<C> {
             Instr::Globl("_run".to_string()),
             Instr::Label("_run".to_string()),
             Instr::Long(0x10000000),
-            Instr::Addr(self.env_label.clone(), true),
             // Write the constant data.
             Instr::Align4,
             Instr::Section(".data".to_string()),
@@ -1070,7 +1068,6 @@ impl<C: CreateSExp> Program<C> {
         program: HashMap<String, C::SL>,
         filename: &str,
         sexp: C::S,
-        env: C::S,
         target_addr: u32,
         symbol_table: Rc<HashMap<String, String>>,
     ) -> Result<Self, String> {
@@ -1111,7 +1108,6 @@ impl<C: CreateSExp> Program<C> {
         let mut p: Program<C> = Program {
             finished_insns: Vec::new(),
             first_label: Default::default(),
-            env_label: Default::default(),
             encounters_of_code: Default::default(),
             labels_by_hash: Default::default(),
             code_to_hash: Default::default(),
@@ -1130,7 +1126,6 @@ impl<C: CreateSExp> Program<C> {
         };
 
         p.symbol_table = symbol_table;
-        let envhash = sexp.sha256tree();
         for (remap_hash, name, remap_sexp) in remap_hashes.into_iter() {
             let remap_hash_hex = hex::encode(&remap_hash);
             p.renamed_symbols
@@ -1139,7 +1134,6 @@ impl<C: CreateSExp> Program<C> {
         }
         p.first_label = p.add(None, sexp.clone());
         p.start_insns(creator);
-        p.env_label = p.add_sexp(&envhash, env);
         while !p.waiting_programs.is_empty() {
             p.emit_waiting(creator);
         }

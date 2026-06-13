@@ -3,6 +3,7 @@ name = "clvm_to_arm_emulate"
 version = "0.1.0"
 edition = "2024"
 authors = ["Art Yerkes <art.yerkes@gmail.com>"]
+description = "Run code from clvm_to_arm_generate and provide interfaces for control and inspection with gdb"
 license = "Apache-2.0"
 homepage = "https://github.com/prozacchiwawa/clvm_arm_jit"
 repository = "https://github.com/prozacchiwawa/clvm_arm_jit"

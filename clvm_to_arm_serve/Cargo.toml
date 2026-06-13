@@ -3,6 +3,7 @@ name = "clvm_to_arm_serve"
 version = "0.1.0"
 edition = "2024"
 authors = ["Art Yerkes <art.yerkes@gmail.com>"]
+description = "Provide a simple way of starting the gdb stub on the command line running a program output from clvm_to_arm_generate"
 license = "Apache-2.0"
 homepage = "https://github.com/prozacchiwawa/clvm_arm_jit"
 repository = "https://github.com/prozacchiwawa/clvm_arm_jit"

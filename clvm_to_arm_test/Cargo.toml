@@ -3,6 +3,7 @@ name = "clvm_to_arm_test"
 version = "0.1.0"
 edition = "2024"
 authors = ["Art Yerkes <art.yerkes@gmail.com>"]
+description = "Provide a simple harness for testing clvm_to_arm_generate output combined with clvm_to_arm_emulate's emulation"
 license = "Apache-2.0"
 homepage = "https://github.com/prozacchiwawa/clvm_arm_jit"
 repository = "https://github.com/prozacchiwawa/clvm_arm_jit"

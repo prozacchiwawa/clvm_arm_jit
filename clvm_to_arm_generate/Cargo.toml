@@ -3,6 +3,7 @@ name = "clvm_to_arm_generate"
 version = "0.1.0"
 edition = "2024"
 authors = ["Art Yerkes <art.yerkes@gmail.com>"]
+description = "Generate arm code equivalent to given clvm code to inspect and debug with gdb"
 license = "Apache-2.0"
 homepage = "https://github.com/prozacchiwawa/clvm_arm_jit"
 repository = "https://github.com/prozacchiwawa/clvm_arm_jit"

@@ -284,7 +284,6 @@ fn choose_location<C: CreateSExp>(
     let filename = this_loc.filename();
     let last_component_offset = filename.find('/').map(|a| a + 1).unwrap_or(0);
     let last_component = filename[last_component_offset..].to_string();
-    eprintln!("last_component {last_component}");
 
     if last_component.starts_with("*")
         && let Some(next) = parent

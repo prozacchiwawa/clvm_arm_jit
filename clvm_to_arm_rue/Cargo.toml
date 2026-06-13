@@ -2,9 +2,17 @@
 name = "clvm_to_arm_rue"
 version = "0.1.0"
 edition = "2024"
+authors = ["Art Yerkes <art.yerkes@gmail.com>"]
+description = "Generate gdb debuggable code from rue input"
+license = "Apache-2.0"
+homepage = "https://github.com/prozacchiwawa/clvm_arm_jit"
+repository = "https://github.com/prozacchiwawa/clvm_arm_jit"
+readme = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
 
 [dependencies]
-chialisp = "0.4.4"
+chialisp = "0.4.5"
 clvm_to_arm_generate = { path = "../clvm_to_arm_generate" }
 clvm_to_arm_emulate = { path = "../clvm_to_arm_emulate" }
 clvmr = "0.16.4"

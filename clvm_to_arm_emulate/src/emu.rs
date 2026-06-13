@@ -329,11 +329,15 @@ fn is_quote_operator(allocator: &Allocator, sexp: NodePtr) -> bool {
     false
 }
 
-fn match_printing(allocator: &Allocator, operator: NodePtr, sexp: NodePtr) -> Option<NodePtr> {
+fn match_printing(allocator: &Allocator, operator: NodePtr, sexp: NodePtr) -> Option<(bool, NodePtr)> {
     if let Some(v) = get_number(allocator, operator)
         && v == 34_u32.to_bigint().unwrap()
     {
-        return is_print_request(allocator, sexp);
+        return is_print_request(allocator, sexp).map(|p| (false, p));
+    }
+
+    if let SExp::Atom = allocator.sexp(operator) && allocator.atom(operator) == clvmr::Atom::Borrowed(b"debug_print") {
+        return Some((true, sexp));
     }
 
     None
@@ -457,17 +461,28 @@ impl Emu {
     fn do_apply_op(
         &mut self,
         allocator: &mut Allocator,
-        operator: NodePtr,
-        args: NodePtr,
+        mut operator: NodePtr,
+        mut args: NodePtr,
     ) -> Option<Event> {
         let alloc_ptr = self.cpu.reg_get(Mode::User, 5);
         let mut debug = false;
-        if let Some(printing) = match_printing(allocator, operator, args) {
+        let mut assume_nil = false;
+
+        if let Some((nil, printing)) = match_printing(allocator, operator, args) {
             self.pending_gdb_console_output
                 .push(format!("DEBUG: {}", disassemble(allocator, printing)));
             debug = true;
+            assume_nil = nil;
         }
-        match apply_op(allocator, operator, args) {
+
+        let result =
+            if assume_nil {
+                Ok(allocator.nil())
+            } else {
+                apply_op(allocator, operator, args)
+            };
+
+        match result {
             Ok(res) => {
                 // Allocate and write back result.
                 let write_result = self.allocate_and_write(allocator, alloc_ptr, res);

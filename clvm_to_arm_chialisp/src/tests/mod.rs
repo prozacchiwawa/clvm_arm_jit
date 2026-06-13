@@ -57,7 +57,7 @@ fn compile_and_gdb(
         env,
     )?;
     std::fs::write(&format!("{filename}.elf"), &compiled.object.object_file).unwrap();
-    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands)
+    run_gdb(compiled.object, compiled.symbols.clone(), gdb_commands).map(|(out,err)| out)
 }
 
 #[test]

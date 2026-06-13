@@ -16,7 +16,7 @@ pub fn run_gdb(
     object: ElfObject,
     symbols: Rc<HashMap<String, String>>,
     gdb_commands: &[&str],
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let elf_out = NamedTempFile::new().unwrap();
     elf_out.as_file().write_all(&object.object_file).unwrap();
     let (gdb_remote_sender, gdb_remote_receiver) = mpsc::channel();
@@ -42,10 +42,11 @@ pub fn run_gdb(
         }
     }
     gdb_command_line.push(elf_out.path().display().to_string());
-    let result = Exec::cmd("gdb-multiarch")
+    let result_obj = Exec::cmd("gdb-multiarch")
         .args(&gdb_command_line)
         .capture()
-        .unwrap()
-        .stdout_str();
-    Ok(result)
+        .unwrap();
+    let stderr = result_obj.stderr_str();
+    let stdout = result_obj.stdout_str();
+    Ok((stdout, stderr))
 }

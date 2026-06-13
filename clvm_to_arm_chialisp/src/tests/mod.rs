@@ -314,5 +314,5 @@ fn test_gdb_breakpoint_on_function_modern() {
         .expect("should compile and load");
     eprintln!("result {result}");
     assert!(!result.contains("<MULTIPLE>"));
-    assert!(result.contains("clsp:2"));
+    assert!(result.contains("clsp:3"));
 }

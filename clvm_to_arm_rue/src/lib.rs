@@ -29,7 +29,6 @@ use chialisp::util::Number;
 
 pub struct Args {
     pub filename: String,
-    pub env: String,
     pub output: String,
 }
 
@@ -1790,27 +1789,16 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
     let symbol_locs = build_symbol_locs(&ctx, &tree);
     let output = compile_main(&mut creator, &mut ctx, &tree, main, base_path, &symbol_locs)?;
 
-    let env = creator.allocator.with_allocator_mut(|a| {
-        assemble(a, &args.env).map_err(|e| format!("failed to read env: {e:?}"))
-    })?;
-    let env_loc = RueSrcLoc {
-        raw: Rc::new(SrcLoc::new(
-            Source::new("".to_string().into(), SourceKind::Std("*env*".to_string())),
-            std::ops::Range { start: 0, end: 0 },
-        )),
-    };
     let symbols = Rc::new(output.symbols.clone());
 
     let mut creator = CreateRueSExp {
         allocator: creator.allocator.clone(),
     };
-    let rue_env = RueSExp::from_node(creator.allocator.clone(), &env_loc, env);
     let program = Program::new(
         &mut creator,
         output.srclocs,
         &args.filename,
         output.program,
-        rue_env,
         TARGET_ADDR,
         symbols.clone(),
     )?;

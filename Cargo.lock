@@ -444,9 +444,11 @@ dependencies = [
 name = "clvm_to_arm_serve"
 version = "0.1.0"
 dependencies = [
+ "chialisp",
  "clap",
  "clvm_to_arm_emulate",
  "clvm_to_arm_generate",
+ "clvmr",
  "hex",
  "num-bigint",
  "serde",

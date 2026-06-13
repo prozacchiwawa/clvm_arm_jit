@@ -39,10 +39,8 @@ pub fn compile(
     program: &str,
     output: &str,
     search_paths: &[String],
-    env: &str,
 ) -> Result<CompileResult, String> {
     let srcloc = Srcloc::start(filename);
-    let env_parsed = parse_sexp(srcloc.clone(), env.bytes()).map_err(|e| format!("{e:?}"))?;
     let mut symbol_table = HashMap::new();
     let runner: Rc<dyn TRunProgram> = Rc::new(DefaultProgramRunner::new());
     let mut parse_input = HashMap::new();
@@ -132,7 +130,6 @@ pub fn compile(
         range_results,
         filename,
         RcSExp(compiled),
-        RcSExp(env_parsed[0].clone()),
         TARGET_ADDR,
         symbols.clone(),
     )?;

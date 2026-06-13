@@ -8,11 +8,17 @@ use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_emulate::emu_stub::{run_stub, start_stub};
 use clvm_to_arm_generate::code::TARGET_ADDR;
 
+use chialisp::classic::clvm_tools::binutils::assemble;
+use clvmr::Allocator;
+
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
     #[arg(short, long)]
     elf: String,
+
+    #[arg(short, long)]
+    arg: String,
 
     #[arg(short, long)]
     symbols: Option<String>,
@@ -31,8 +37,16 @@ fn run_emu_stub(args: &Args) -> Result<(), String> {
     } else {
         HashMap::default()
     };
+    let mut allocator = Allocator::new();
+    let env_node = assemble(&mut allocator, &args.arg).map_err(|e| format!("{e:?}"))?;
     let mut emu =
-        Emu::new(&elf_prog, TARGET_ADDR, Rc::new(symbols)).map_err(|e| format!("{e:?}"))?;
+        Emu::new(
+            &mut allocator,
+            &elf_prog,
+            env_node,
+            TARGET_ADDR,
+            Rc::new(symbols)
+        ).map_err(|e| format!("{e:?}"))?;
 
     let (addr, connection) =
         start_stub(args.port.map(|p| p as u16)).map_err(|_e| "error starting stub".to_string())?;

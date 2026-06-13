@@ -12,8 +12,12 @@ use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_emulate::emu_stub::run_stub;
 use clvm_to_arm_generate::code::{ElfObject, TARGET_ADDR};
 
+use clvmr::Allocator;
+use chialisp::classic::clvm_tools::binutils::assemble;
+
 pub fn run_gdb(
     object: ElfObject,
+    env: &str,
     symbols: Rc<HashMap<String, String>>,
     gdb_commands: &[&str],
 ) -> Result<(String, String), String> {
@@ -22,8 +26,17 @@ pub fn run_gdb(
     let (gdb_remote_sender, gdb_remote_receiver) = mpsc::channel();
     let symbols_ref: &HashMap<String, String> = &symbols;
     let symbols_copy = symbols_ref.clone();
+    let env_string = env.to_string();
     let _gdb_thread = thread::spawn(move || {
-        let mut emu = Emu::new(&object.object_file, TARGET_ADDR, Rc::new(symbols_copy)).unwrap();
+        let mut allocator = Allocator::new();
+        let env_node = assemble(&mut allocator, &env_string).unwrap();
+        let mut emu = Emu::new(
+            &mut allocator,
+            &object.object_file,
+            env_node,
+            TARGET_ADDR,
+            Rc::new(symbols_copy)
+        ).unwrap();
         let sockaddr = "127.0.0.1:0";
         let sock = TcpListener::bind(sockaddr).unwrap();
         let local_addr = sock.local_addr().unwrap();

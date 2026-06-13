@@ -10,14 +10,10 @@ struct CmdArgs {
 
     #[arg(short, long)]
     source: String,
-
-    #[arg(short, long)]
-    env: String,
 }
 
 fn compile_rue_code(args: &CmdArgs) -> Result<(), String> {
     let compiled = compile_rue_to_arm_elf(&Args {
-        env: args.env.clone(),
         filename: args.source.clone(),
         output: args.output.clone(),
     })

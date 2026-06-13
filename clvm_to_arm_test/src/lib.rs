@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 
 use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_emulate::emu_stub::run_stub;
-use clvm_to_arm_generate::code::{ElfObject, TARGET_ADDR};
+use clvm_to_arm_generate::code::ElfObject;
 
 use clvmr::Allocator;
 use chialisp::classic::clvm_tools::binutils::assemble;
@@ -34,7 +34,6 @@ pub fn run_gdb(
             &mut allocator,
             &object.object_file,
             env_node,
-            TARGET_ADDR,
             Rc::new(symbols_copy)
         ).unwrap();
         let sockaddr = "127.0.0.1:0";

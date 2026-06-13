@@ -258,7 +258,6 @@ impl CallbackGdbStub {
             allocator,
             elf_bin,
             env,
-            clvm_to_arm_generate::code::TARGET_ADDR,
             symbols
         )
             .map_err(|e| format!("could not create emulator: {e:?}"))?;

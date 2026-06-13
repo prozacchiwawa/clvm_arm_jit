@@ -6,7 +6,6 @@ use clap::Parser;
 
 use clvm_to_arm_emulate::emu::Emu;
 use clvm_to_arm_emulate::emu_stub::{run_stub, start_stub};
-use clvm_to_arm_generate::code::TARGET_ADDR;
 
 use chialisp::classic::clvm_tools::binutils::assemble;
 use clvmr::Allocator;
@@ -44,7 +43,6 @@ fn run_emu_stub(args: &Args) -> Result<(), String> {
             &mut allocator,
             &elf_prog,
             env_node,
-            TARGET_ADDR,
             Rc::new(symbols)
         ).map_err(|e| format!("{e:?}"))?;
 

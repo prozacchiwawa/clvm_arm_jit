@@ -29,7 +29,7 @@ use clvm_to_arm_generate::sexp::{Number, bi_one, bi_zero, u8_from_number};
 use clvm_to_arm_generate::arm::{Encodable, Instr, Register};
 use clvm_to_arm_generate::code::{
     NEXT_ALLOC_OFFSET, SWI_DISPATCH_INSTRUCTION, SWI_DISPATCH_NEW_CODE, SWI_DONE, SWI_PRINT_EXPR,
-    SWI_THROW,
+    SWI_THROW, TARGET_ADDR,
 };
 use clvm_to_arm_generate::loader::{ElfLoader, EmuSymbolInfo};
 use clvm_to_arm_generate::mem::{PagedMemory, TargetMemory};
@@ -388,7 +388,6 @@ impl Emu {
         allocator: &mut Allocator,
         program_elf: &[u8],
         env_node: NodePtr,
-        start_addr: u32,
         clvm_symbols: Rc<HashMap<String, String>>,
     ) -> DynResult<Emu> {
         // set up emulated system
@@ -396,18 +395,18 @@ impl Emu {
         let mut mem = PagedMemory::default();
 
         // copy all in-memory sections from the ELF file into system RAM
-        let elf_loader = ElfLoader::new(program_elf, start_addr).expect("should load");
+        let elf_loader = ElfLoader::new(program_elf, TARGET_ADDR).expect("should load");
         elf_loader.load(&mut mem);
 
         let jit_symbols = Rc::new(elf_loader.get_symbols());
 
         cpu.reg_set(Mode::User, reg::SP, 0xffffff00);
         cpu.reg_set(Mode::User, reg::LR, HLE_RETURN_ADDR);
-        cpu.reg_set(Mode::User, reg::PC, start_addr);
+        cpu.reg_set(Mode::User, reg::PC, TARGET_ADDR);
         cpu.reg_set(Mode::User, reg::CPSR, 0x10); // user mode
 
         let mut emu = Emu {
-            start_addr,
+            start_addr: TARGET_ADDR,
             env_addr: 0,
 
             custom_reg: 0x12345678,
@@ -931,11 +930,10 @@ impl Emu {
         allocator: &mut Allocator,
         program: &[u8],
         env: NodePtr,
-        start_addr: u32,
         clvm_symbols: Rc<HashMap<String, String>>,
     ) -> DynResult<Option<NodePtr>> {
-        let mut emu = Emu::new(allocator, program, env, start_addr, clvm_symbols)?;
-        let elf_loader = ElfLoader::new(program, start_addr).expect("should load");
+        let mut emu = Emu::new(allocator, program, env, clvm_symbols)?;
+        let elf_loader = ElfLoader::new(program, TARGET_ADDR).expect("should load");
         elf_loader.load(&mut emu.mem);
 
         loop {

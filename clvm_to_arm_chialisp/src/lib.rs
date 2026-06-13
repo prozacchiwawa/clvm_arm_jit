@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::{ElfObject, Program};
 use clvmr::Allocator;
 
 use chialisp::classic::clvm_tools::comp_input::RunAndCompileInputData;
@@ -157,7 +157,6 @@ pub fn compile(
         range_results,
         filename,
         RcSExp(compiled),
-        TARGET_ADDR,
         symbols.clone(),
     )?;
     Ok(CompileResult {

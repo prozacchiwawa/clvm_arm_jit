@@ -19,7 +19,7 @@ use rue_lir::{ClvmOp, Lir, LirId, bigint_atom};
 use rue_options::find_project;
 
 use clvm_to_arm_generate::clvmr_node::{ClvmrAllocator, ClvmrWrapper};
-use clvm_to_arm_generate::code::{ElfObject, Program, TARGET_ADDR};
+use clvm_to_arm_generate::code::{ElfObject, Program};
 use clvm_to_arm_generate::sexp::{CreateSExp, HasSrcloc, SExp, SExpValue, Srcloc, Until};
 
 use chialisp::classic::clvm_tools::binutils::assemble;
@@ -1799,7 +1799,6 @@ pub fn compile_rue_to_arm_elf(args: &Args) -> Result<RueGenerateOutput, String> 
         output.srclocs,
         &args.filename,
         output.program,
-        TARGET_ADDR,
         symbols.clone(),
     )?;
 
